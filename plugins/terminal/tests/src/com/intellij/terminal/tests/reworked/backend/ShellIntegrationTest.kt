@@ -16,9 +16,9 @@ import kotlinx.coroutines.channels.SendChannel
 import org.assertj.core.api.Assertions.assertThat
 import org.jetbrains.plugins.terminal.LocalTerminalCustomizer
 import org.jetbrains.plugins.terminal.ShellStartupOptions
-import org.jetbrains.plugins.terminal.session.*
-import org.jetbrains.plugins.terminal.session.dto.toState
-import org.jetbrains.plugins.terminal.session.dto.toStyleRange
+import org.jetbrains.plugins.terminal.session.impl.*
+import org.jetbrains.plugins.terminal.session.impl.dto.toState
+import org.jetbrains.plugins.terminal.session.impl.dto.toStyleRange
 import org.junit.Assume
 import org.junit.Rule
 import org.junit.Test
@@ -390,13 +390,14 @@ internal class ShellIntegrationTest(private val shellPath: Path) {
     block: suspend (SendChannel<TerminalInputEvent>) -> Unit,
   ): List<TerminalOutputEvent> {
     return coroutineScope {
-      val allOptions = if (options.shellCommand != null) {
-        options
-      }
-      else {
-        val shellCommand = TerminalSessionTestUtil.createShellCommand(shellPath.toString())
-        options.builder().shellCommand(shellCommand).build()
-      }
+      val allOptions = options.builder().modify { builder ->
+        if (options.shellCommand == null) {
+          builder.shellCommand(TerminalSessionTestUtil.createShellCommand(shellPath.toString()))
+        }
+        if (options.workingDirectory == null) {
+          builder.workingDirectory(System.getProperty("user.home"))
+        }
+      }.build()
 
       TerminalSessionTestUtil.assumeCommandBlockShellIntegration(allOptions.shellCommand!!)
 
@@ -405,7 +406,7 @@ internal class ShellIntegrationTest(private val shellPath: Path) {
         allOptions,
         isLowLevelSession,
         childScope("TerminalSession"),
-      )
+      ).session
       val inputChannel = session.getInputChannel()
 
       val outputEvents = mutableListOf<TerminalOutputEvent>()

@@ -19,8 +19,8 @@ jvm_library(
   kotlinc_opts = ":custom_core-fe10",
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:asm",
-    "@lib//:stream_ex",
+    "//libraries/asm",
+    "//libraries/stream",
     "//libraries/caffeine",
     "@lib//:kotlinc-kotlin-compiler-common",
     "@lib//:kotlinc-kotlin-compiler-fe10",

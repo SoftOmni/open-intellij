@@ -15,20 +15,17 @@ import com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode.UNVERSIONED_FILES_
 import com.intellij.openapi.vcs.changes.ui.ChangesListView
 import com.intellij.openapi.vcs.changes.ui.EditChangelistSupport
 import com.intellij.openapi.vcs.changes.ui.VcsTreeModelData.*
-import com.intellij.platform.vcs.impl.shared.commit.EditedCommitPresentation
-import com.intellij.ui.EditorTextComponent
-import com.intellij.util.ui.JBUI
+import com.intellij.util.application
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.tree.TreeUtil.*
 import org.jetbrains.annotations.ApiStatus
 import javax.swing.JComponent
-import kotlin.properties.Delegates.observable
 
 abstract class ChangeListViewCommitPanel @ApiStatus.Internal constructor(
   project: Project,
   private val changesView: ChangesListView,
 ) : NonModalCommitPanel(project), ChangesViewCommitWorkflowUi {
-  private val progressPanel = ChangeListViewCommitProgressPanel(project, this, commitMessage.editorField)
+  private val progressPanel = CommitProgressPanel(project, this, commitMessage.editorField)
 
   private val commitActions = commitActionsPanel.createActions()
   private var rootComponent: JComponent? = null
@@ -61,12 +58,6 @@ abstract class ChangeListViewCommitPanel @ApiStatus.Internal constructor(
     commitActions.forEach { it.registerCustomShortcutSet(newRootComponent, this) }
   }
 
-  final override var editedCommit: EditedCommitPresentation? by observable(null) { _, _, newValue ->
-    ChangesViewManager.getInstanceEx(project).promiseRefresh().then {
-      newValue?.let { expand(it) }
-    }
-  }
-
   final override fun expand(item: Any) {
     val node = changesView.findNodeInTree(item)
     node?.let { changesView.expandSafe(it) }
@@ -97,11 +88,9 @@ abstract class ChangeListViewCommitPanel @ApiStatus.Internal constructor(
   final override fun getIncludedUnversionedFiles(): List<FilePath> =
     includedUnderTag(changesView, UNVERSIONED_FILES_TAG).userObjects(FilePath::class.java)
 
-  final override var inclusionModel: InclusionModel?
-    get() = changesView.inclusionModel
-    set(value) {
-      changesView.setInclusionModel(value)
-    }
+  override fun setInclusionModel(model: InclusionModel?) {
+    changesView.setInclusionModel(model)
+  }
 
   final override val commitProgressUi: CommitProgressUi get() = progressPanel
 
@@ -109,33 +98,15 @@ abstract class ChangeListViewCommitPanel @ApiStatus.Internal constructor(
 
   private fun closeEditorPreviewIfEmpty() {
     val changesViewManager = ChangesViewManager.getInstance(project) as? ChangesViewManager ?: return
-    ChangesViewManager.getInstanceEx(project).promiseRefresh().then {
-      changesViewManager.closeEditorPreview(true)
+    ChangesViewManager.getInstanceEx(project).scheduleRefresh {
+      application.invokeLater {
+        changesViewManager.closeEditorPreview(true)
+      }
     }
   }
 
   final override fun dispose() {
     changesView.isShowCheckboxes = false
     changesView.setInclusionListener(null)
-  }
-}
-
-private class ChangeListViewCommitProgressPanel(
-  project: Project,
-  private val commitWorkflowUi: ChangesViewCommitWorkflowUi,
-  commitMessage: EditorTextComponent,
-) : CommitProgressPanel(project) {
-
-  private var oldInclusion: Set<Any> = emptySet()
-
-  init {
-    setup(commitWorkflowUi, commitMessage, JBUI.Borders.empty())
-  }
-
-  override fun inclusionChanged() {
-    val newInclusion = commitWorkflowUi.inclusionModel?.getInclusion().orEmpty()
-
-    if (oldInclusion != newInclusion) super.inclusionChanged()
-    oldInclusion = newInclusion
   }
 }

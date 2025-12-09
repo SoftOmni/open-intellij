@@ -25,6 +25,7 @@ import com.intellij.openapi.actionSystem.util.ActionSystem
 import com.intellij.openapi.application.*
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.ex.EditorGutterComponentEx
 import com.intellij.openapi.keymap.impl.ActionProcessor
@@ -294,7 +295,7 @@ object Utils {
     val fastTrackTime = getFastTrackMaxTime(fastTrack, place, uiKind is ActionUiKind.Toolbar, true)
     val edtDispatcher =
       if (fastTrackTime > 0) AltEdtDispatcher.apply { switchToQueue() }
-      else Dispatchers.UiWithModelAccess[CoroutineDispatcher]!!
+      else Dispatchers.EDT[CoroutineDispatcher]!!
     val updater = ActionUpdater(presentationFactory, asyncDataContext, place, uiKind, edtDispatcher)
     val deferred = async(edtDispatcher, CoroutineStart.UNDISPATCHED) {
       updater.runUpdateSession(updaterContext(place, fastTrackTime, uiKind)) {
@@ -712,6 +713,15 @@ object Utils {
     }
     sb.append(")")
     sb.insert(0, StringUtilRt.getShortName(c.getName()))
+
+    if (action is AnAction) {
+      val actionManager = serviceIfCreated<ActionManager>()
+      val actionId = actionManager?.getId(action)
+      if (actionId != null) {
+        sb.append(" \"$actionId\"")
+      }
+    }
+
     return sb.toString()
   }
 
@@ -915,7 +925,7 @@ object Utils {
   @JvmStatic
   fun initUpdateSession(e: AnActionEvent) {
     if (e.updateSession !== UpdateSession.EMPTY) return
-    val edtDispatcher = Dispatchers.UiWithModelAccess[CoroutineDispatcher]!!
+    val edtDispatcher = Dispatchers.EDT[CoroutineDispatcher]!!
     val actionUpdater = ActionUpdater(PresentationFactory(), e.dataContext, e.place, e.uiKind, edtDispatcher)
     e.updateSession = actionUpdater.asUpdateSession()
   }
@@ -923,7 +933,7 @@ object Utils {
   suspend fun <R> withSuspendingUpdateSession(e: AnActionEvent, factory: PresentationFactory,
                                               actionFilter: (AnAction) -> Boolean,
                                               block: suspend CoroutineScope.(SuspendingUpdateSession) -> R): R = coroutineScope {
-    val edtDispatcher = Dispatchers.UiWithModelAccess[CoroutineDispatcher]!!
+    val edtDispatcher = Dispatchers.EDT[CoroutineDispatcher]!!
     val dataContext = createAsyncDataContext(e.dataContext)
     checkAsyncDataContext(dataContext, "withSuspendingUpdateSession")
     val updater = ActionUpdater(factory, dataContext, e.place, e.uiKind, edtDispatcher, actionFilter)

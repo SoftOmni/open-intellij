@@ -17,6 +17,7 @@ import com.intellij.openapi.vcs.changes.LocallyDeletedChange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.platform.vcs.VcsUtil;
 import com.intellij.platform.vcs.changes.ChangesUtil;
+import com.intellij.platform.vcs.impl.shared.changes.ChangesTreeNodeFactory;
 import com.intellij.platform.vcs.impl.shared.changes.TreeModelBuilderEx;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.concurrency.annotations.RequiresReadLock;
@@ -213,7 +214,9 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
 
       ChangesBrowserNode<?> changesParent;
       if (!skipChangeListNode) {
-        ChangesBrowserChangeListNode listNode = new ChangesBrowserChangeListNode(myProject, list, listRemoteState);
+        ChangesBrowserChangeListNode listNode = Objects.requireNonNullElseGet(
+          ChangesTreeNodeFactory.Companion.createChangeListNode(myProject, list, listRemoteState),
+          () -> new ChangesBrowserChangeListNode(myProject, list, listRemoteState));
         listNode.markAsHelperNode();
 
         insertSubtreeRoot(listNode);
@@ -229,17 +232,10 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
         ChangeNodeDecorator baseDecorator = modelBuilderEx != null ?
                                             modelBuilderEx.getChangeNodeInChangelistBaseDecorator(listRemoteState, change, i) : null;
         ChangeNodeDecorator decorator = changeDecoratorProvider != null ? changeDecoratorProvider.apply(baseDecorator) : baseDecorator;
-        if (ChangesUtil.isMergeConflict(change)) {
-          if (conflictsRoot == null) {
-            conflictsRoot = new ChangesBrowserConflictsNode(myProject);
-            conflictsRoot.markAsHelperNode();
-            myModel.insertNodeInto(conflictsRoot, myRoot, myModel.getChildCount(myRoot));
-          }
-          insertChangeNode(change, conflictsRoot, createChangeNode(change, decorator));
-        }
-        else {
-          insertChangeNode(change, changesParent, createChangeNode(change, decorator));
-        }
+        ChangesBrowserNode<?> changeNode = Objects.requireNonNullElseGet(
+          ChangesTreeNodeFactory.Companion.createChangeNode(myProject, change, decorator, changesParent),
+          () -> createChangeNode(change, decorator));
+        insertChangeNode(change, changesParent, changeNode);
       }
     }
     return this;

@@ -13,12 +13,10 @@ import com.jetbrains.python.psi.impl.PyCallExpressionNavigator
 import com.jetbrains.python.psi.impl.PyEvaluator
 import com.jetbrains.python.psi.impl.StubAwareComputation
 import com.jetbrains.python.psi.impl.stubs.PyTypedDictStubImpl
-import com.jetbrains.python.psi.resolve.PyResolveContext
 import com.jetbrains.python.psi.stubs.PyTypedDictFieldStub
 import com.jetbrains.python.psi.stubs.PyTypedDictStub
 import com.jetbrains.python.psi.types.*
 import com.jetbrains.python.psi.types.PyTypedDictType.Companion.TYPED_DICT_TOTAL_PARAMETER
-import java.util.*
 import java.util.stream.Collectors
 
 typealias TDFields = LinkedHashMap<String, PyTypedDictType.FieldTypeAndTotality>
@@ -371,12 +369,14 @@ class PyTypedDictTypeProvider : PyTypeProviderBase() {
       return PyTypedDictType.FieldTypeAndTotality(null, pyType, qualifiers)
     }
 
-    private fun getStringBasedTypeForTypedDict(contents: String,
-                                               anchor: PsiElement,
-                                               context: TypeEvalContext): Pair<Ref<PyType?>?, PyTypedDictType.TypedDictFieldQualifiers?>? {
+    private fun getStringBasedTypeForTypedDict(
+      contents: String,
+      anchor: PsiElement,
+      context: TypeEvalContext,
+    ): Pair<Ref<PyType?>?, PyTypedDictType.TypedDictFieldQualifiers?>? {
       val file = FileContextUtil.getContextFile(anchor) ?: return null
       val expr = PyUtil.createExpressionFromFragment(contents, file)
-      var qualifiers: PyTypedDictType.TypedDictFieldQualifiers ? = null
+      var qualifiers: PyTypedDictType.TypedDictFieldQualifiers? = null
       if (expr is PySubscriptionExpression) {
         qualifiers = parseTypedDictFieldQualifiers(expr, context)
       }

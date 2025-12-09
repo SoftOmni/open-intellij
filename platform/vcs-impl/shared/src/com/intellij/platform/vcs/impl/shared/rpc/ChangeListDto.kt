@@ -5,10 +5,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.vcs.FileStatus
 import com.intellij.openapi.vcs.FileStatusFactory
-import com.intellij.openapi.vcs.changes.Change
-import com.intellij.openapi.vcs.changes.ChangeList
-import com.intellij.openapi.vcs.changes.ChangeListChange
-import com.intellij.openapi.vcs.changes.LocalChangeListImpl
+import com.intellij.openapi.vcs.changes.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import org.jetbrains.annotations.ApiStatus
@@ -23,18 +20,16 @@ data class ChangeListDto(
   private val id: @NonNls String,
   private val isDefault: Boolean,
   private val changes: List<ChangeDto>,
-  @Transient private val localValue: ChangeList? = null,
+  @Transient private var localValue: LocalChangeList? = null,
 ) {
-  private var cachedChangeList: ChangeList? = null
-
-  fun getChangeList(project: Project): ChangeList {
-    return cachedChangeList ?: computeChangeList(project).also {
-      cachedChangeList = it
+  fun getChangeList(project: Project): LocalChangeList {
+    return localValue ?: computeChangeList(project).also {
+      localValue = it
     }
   }
 
-  private fun computeChangeList(project: Project): ChangeList {
-    return localValue ?: LocalChangeListImpl.Builder(project, name).apply {
+  private fun computeChangeList(project: Project): LocalChangeList {
+    return LocalChangeListImpl.Builder(project, name).apply {
       if (comment != null) {
         setComment(comment)
       }
@@ -57,6 +52,22 @@ data class ChangeDto(
 
     val fileStatus = PLATFORM_FILE_STATUSES[fileStatusId]
     Change(beforeRevision?.contentRevision, afterRevision?.contentRevision, fileStatus)
+  }
+
+  companion object {
+    fun toDto(change: Change): ChangeDto = ChangeDto(
+      beforeRevision = change.beforeRevision?.toDto(),
+      afterRevision = change.afterRevision?.toDto(),
+      fileStatusId = change.fileStatus.id,
+      localValue = change,
+    )
+
+    private fun ContentRevision.toDto() = ContentRevisionDto(
+      revisionString = revisionNumber.asString(),
+      filePath = FilePathDto.toDto(file),
+      localValue = this,
+    )
+
   }
 }
 

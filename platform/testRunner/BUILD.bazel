@@ -25,7 +25,8 @@ jvm_library(
     "//platform/platform-impl:ide-impl",
     "//platform/xdebugger-api:debugger",
     "//platform/diff-impl",
-    "@lib//:fastutil-min",
+    "//platform/forms_rt:java-guiForms-rt",
+    "//libraries/fastutil",
     "//platform/core-ui",
     "//platform/platform-util-io:ide-util-io",
     "//platform/ide-core-impl",
@@ -33,6 +34,8 @@ jvm_library(
     "//platform/util/jdom",
     "//platform/analysis-impl",
     "//platform/xdebugger-impl:debugger-impl",
+    "//platform/core-impl",
+    "//platform/execution",
   ]
 )
 
@@ -53,7 +56,8 @@ jvm_library(
     "//platform/platform-impl:ide-impl",
     "//platform/xdebugger-api:debugger",
     "//platform/diff-impl",
-    "@lib//:fastutil-min",
+    "//platform/forms_rt:java-guiForms-rt",
+    "//libraries/fastutil",
     "@lib//:junit4",
     "//platform/core-ui",
     "//platform/platform-util-io:ide-util-io",
@@ -65,6 +69,8 @@ jvm_library(
     "//platform/testFramework:testFramework_test_lib",
     "//platform/xdebugger-impl:debugger-impl",
     "//platform/xdebugger-impl:debugger-impl_test_lib",
+    "//platform/core-impl",
+    "//platform/execution",
   ]
 )
 ### auto-generated section `build intellij.platform.testRunner` end

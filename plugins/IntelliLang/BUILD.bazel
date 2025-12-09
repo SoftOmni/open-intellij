@@ -23,14 +23,16 @@ jvm_library(
     "//platform/projectModel-api:projectModel",
     "//RegExpSupport:regexp",
     "//platform/platform-api:ide",
-    "@lib//:stream_ex",
+    "//libraries/stream",
     "//platform/core-api:core",
     "//platform/core-ui",
     "//platform/editor-ui-ex:editor-ex",
     "//xml/xml-parser:parser",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/util/jdom",
     "//platform/analysis-impl",
+    "//platform/core-impl",
+    "//platform/forms_rt:java-guiForms-rt",
   ]
 )
 ### auto-generated section `build intellij.platform.langInjection` end

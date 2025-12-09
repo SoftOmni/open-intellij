@@ -14,10 +14,7 @@ import com.jetbrains.python.psi.resolve.RatedResolveResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class PyCallableTypeImpl implements PyCallableType {
   private final @Nullable List<PyCallableParameter> myParameters;
@@ -29,6 +26,7 @@ public class PyCallableTypeImpl implements PyCallableType {
   public PyCallableTypeImpl(@Nullable List<PyCallableParameter> parameters, @Nullable PyType returnType) {
     this(parameters, returnType, null, null, 0);
   }
+
   public PyCallableTypeImpl(@Nullable List<PyCallableParameter> parameters,
                             @Nullable PyType returnType,
                             @Nullable PyCallable callable,
@@ -82,12 +80,17 @@ public class PyCallableTypeImpl implements PyCallableType {
                                                                     @Nullable PyExpression location,
                                                                     @NotNull AccessDirection direction,
                                                                     @NotNull PyResolveContext resolveContext) {
-    return null;
+    PyClassType delegate = PyUtil.selectCallableTypeRuntimeClass(this, location, resolveContext.getTypeEvalContext());
+    return delegate != null ? delegate.resolveMember(name, location, direction, resolveContext) : Collections.emptyList();
   }
 
+  @SuppressWarnings("DuplicatedCode")
   @Override
   public Object[] getCompletionVariants(String completionPrefix, PsiElement location, ProcessingContext context) {
-    return ArrayUtilRt.EMPTY_OBJECT_ARRAY;
+    TypeEvalContext typeEvalContext = TypeEvalContext.codeCompletion(location.getProject(), location.getContainingFile());
+    PyExpression callee = location instanceof PyReferenceExpression re ? re.getQualifier() : null;
+    PyClassType delegate = PyUtil.selectCallableTypeRuntimeClass(this, callee, typeEvalContext);
+    return delegate != null ? delegate.getCompletionVariants(completionPrefix, location, context) : ArrayUtilRt.EMPTY_OBJECT_ARRAY;
   }
 
   @Override
@@ -159,5 +162,20 @@ public class PyCallableTypeImpl implements PyCallableType {
   @Override
   public int hashCode() {
     return Objects.hash(myParameters, myReturnType, myCallable, myModifier, myImplicitOffset);
+  }
+
+  @Override
+  public @NotNull PyCallableType dropSelf(@NotNull TypeEvalContext context) {
+    final List<PyCallableParameter> parameters = getParameters(context);
+    if (!ContainerUtil.isEmpty(parameters) && myCallable instanceof PyFunction function) {
+      final List<PyCallableParameter> functionParameters = function.getParameters(context);
+
+      if (!ContainerUtil.isEmpty(functionParameters) && functionParameters.get(0).isSelf()) {
+        List<PyCallableParameter> newParameters = ContainerUtil.subList(parameters, 1);
+        return new PyCallableTypeImpl(newParameters, myReturnType, myCallable, myModifier, myImplicitOffset);
+      }
+    }
+
+    return this;
   }
 }

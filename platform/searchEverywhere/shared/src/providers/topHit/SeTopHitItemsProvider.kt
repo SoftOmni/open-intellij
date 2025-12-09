@@ -2,11 +2,11 @@
 package com.intellij.platform.searchEverywhere.providers.topHit
 
 import com.intellij.ide.actions.searcheverywhere.SearchEverywhereContributor
-import com.intellij.ide.actions.searcheverywhere.SearchEverywherePreviewProvider
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.searchEverywhere.*
+import com.intellij.platform.searchEverywhere.presentations.SeItemPresentation
 import com.intellij.platform.searchEverywhere.providers.AsyncProcessor
 import com.intellij.platform.searchEverywhere.providers.SeAsyncContributorWrapper
 import com.intellij.platform.searchEverywhere.providers.SeWrappedLegacyContributorItemsProvider
@@ -34,7 +34,7 @@ open class SeTopHitItemsProvider(
   private val project: Project,
   private val contributorWrapper: SeAsyncContributorWrapper<Any>,
   override val displayName: @Nls String,
-) : SeWrappedLegacyContributorItemsProvider() {
+) : SeWrappedLegacyContributorItemsProvider(), SeCommandsProviderInterface {
   override val contributor: SearchEverywhereContributor<Any> = contributorWrapper.contributor
   override val id: String get() = id(isHost)
 
@@ -60,9 +60,7 @@ open class SeTopHitItemsProvider(
     return contributor.showInFindResults()
   }
 
-  fun isPreviewProvider(): Boolean {
-    return contributorWrapper.contributor is SearchEverywherePreviewProvider
-  }
+  override fun getSupportedCommands(): List<SeCommandInfo> = getSupportedCommandsFromContributor()
 
   override fun dispose() {
     Disposer.dispose(contributorWrapper)

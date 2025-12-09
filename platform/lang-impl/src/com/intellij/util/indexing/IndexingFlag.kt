@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.indexing
 
 import com.intellij.openapi.components.service
@@ -7,21 +7,32 @@ import com.intellij.openapi.vfs.VirtualFileWithId
 import com.intellij.openapi.vfs.newvfs.FileAttribute
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry
 import com.intellij.util.application
-import com.intellij.util.indexing.dependencies.*
+import com.intellij.util.indexing.dependencies.AppIndexingDependenciesService
+import com.intellij.util.indexing.dependencies.FileIndexingStamp
+import com.intellij.util.indexing.dependencies.IsFileChangedResult
+import com.intellij.util.indexing.dependencies.ProjectIndexingDependenciesService
 import com.intellij.util.indexing.impl.perFileVersion.LongFileAttribute
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
-import kotlin.concurrent.Volatile
 
 /**
  * An object dedicated to manage persistent `isIndexed` file flag.
+ *
+ * For each file it saves the file mod count and [AppIndexingDependenciesService.current] at the moment when the file was indexed.
+ * The IndexingFlag is used to quickly check if all indexes for a file are up to date (see IJPL-229).
+ * But if IndexingFlag is not up to date, it doesn't necessarily mean that all indexes for a file are outdated.
+ *
+ * IndexingFlag can also be used to check the dirty files from the previous IDE sessions for which [IndexingStamp] may not have been updated or
+ * the change was not persisted to disk.
+ *
+ * The alternative is [IndexingStamp] which contains information per-index but can become outdated (see the doc) and is slower.
+ * So in practice the combination of the two should be used (see [FileBasedIndexImpl.getIndexingState]).
  */
 @ApiStatus.Internal
 object IndexingFlag {
   private val attribute = FileAttribute("indexing.flag", 1, true)
 
-  @Volatile
-  private var persistence = LongFileAttribute.overFastAttribute(attribute)
+  private val persistence = LongFileAttribute.overFastAttribute(attribute)
   private val hashes = StripedIndexingStampLock()
 
   @JvmStatic
@@ -76,6 +87,18 @@ object IndexingFlag {
     return stamp.isSame(persistence.readLong(fileWithId.id))
   }
 
+  /**
+   * Possible situations:
+   * - Regular situation when we can trust [IndexingStamp] which tells us if any given index is up to date for any given file.
+   *   [IsFileChangedResult.UNKNOWN] is returned and then later in [FileBasedIndexImpl.getIndexingState] the actual [IndexingStamp] is checked.
+   *
+   * - Situation when we cannot trust [IndexingStamp].
+   *   This situation occurs if we lost the whole list of dirty files from the previous session (see [DirtyFileIdsWereMissed]).
+   *   In this case the result from [stamp] ([IsFileChangedResult.YES] or [IsFileChangedResult.NO]) is returned.
+   *   I.e., the file will be either considered fully indexed if file mod count AND IDE configuration didn't change.
+   *   Or it'll be considered fully unindexed if the file OR IDE configuration is changed.
+   *   It also means that if IDE configuration changed, and we lost the list of dirty files, then we'll re-index all the files.
+   */
   @JvmStatic
   fun isFileChanged(file: VirtualFile, stamp: FileIndexingStamp): IsFileChangedResult {
     val fileWithId = file.asApplicable() ?: return IsFileChangedResult.UNKNOWN
@@ -114,7 +137,13 @@ object IndexingFlag {
   }
 
   fun reloadAttributes() {
-    persistence = LongFileAttribute.overFastAttribute(attribute)
+    persistence.close()//will be reopened on next access
+  }
+
+  @JvmStatic
+  fun close(){
+    unlockAllFiles()
+    persistence.close()
   }
 
   @JvmStatic

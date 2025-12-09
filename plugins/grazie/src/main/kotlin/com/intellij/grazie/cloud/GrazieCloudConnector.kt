@@ -1,52 +1,37 @@
 package com.intellij.grazie.cloud
 
-import ai.grazie.gec.model.problem.SentenceWithProblems
-import ai.grazie.ner.model.SentenceWithNERAnnotations
-import ai.grazie.nlp.langs.Language
-import ai.grazie.text.exclusions.SentenceWithExclusions
-import ai.grazie.tree.model.SentenceWithTreeDependencies
+import ai.grazie.api.gateway.client.SuspendableAPIGatewayClient
+import com.intellij.grazie.GrazieConfig
 import com.intellij.grazie.GrazieConfig.State.Processing
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.TextRange
 
 interface GrazieCloudConnector {
+  /**
+   * Returns true if there is a connection to Grazie Cloud.
+   */
+  fun isAuthorized(): Boolean
 
   /**
-   * Returns true if there is a connection to Grazie Cloud and [connectionType] is [Processing.Cloud]
+   * Connects to Grazie Cloud. Returns true if the connection was established successfully and false otherwise.
    */
-  fun seemsCloudConnected(): Boolean
+  fun connect(project: Project): Boolean
 
   /**
-   * Returns the type of the connection. Usually set in settings: ([Processing.Local] or [Processing.Cloud]).
+   * Returns the default value for cloud connection.
    */
-  fun connectionType(): Processing
+  fun isCloudEnabledByDefault(): Boolean
 
   /**
-   * Returns true if there was a recent error during the last GEC request.
+   * Asks user for consent for using Cloud mode.
    */
-  fun isAfterRecentGecError(): Boolean
+  fun askUserConsentForCloud(): Boolean
 
   /**
-   * Rephrases the given [text] at the given [range] in the given [language].
+   * Returns the API Gateway client.
    */
-  fun rephrase(text: String, range: TextRange, language: Language, project: Project): List<String>?
-
-  /**
-   * Marks [sentences] with Named Entity Recognition Annotations for the given [language].
-   */
-  suspend fun nerAnnotations(language: Language, sentences: List<String>, project: Project): List<SentenceWithNERAnnotations>?
-
-  /**
-   * Returns syntactic dependency trees for the given [sentences] using specified language model and parser options.
-   */
-  suspend fun trees(language: Language, modelName: String, parserOptions: List<String>, sentences: List<String>, project: Project): List<SentenceWithTreeDependencies>?
-
-  /**
-   * Returns machine learning errors for the given [sentences] in the given [language].
-   */
-  suspend fun mlec(sentences: List<SentenceWithExclusions>, lang: Language, project: Project): List<SentenceWithProblems>?
+  fun api(): SuspendableAPIGatewayClient?
 
   /**
    * Subscribe to authorization state change events.
@@ -54,8 +39,32 @@ interface GrazieCloudConnector {
   fun subscribeToAuthorizationStateEvents(disposable: Disposable, listener: () -> Unit)
 
   companion object {
-    val EP_NAME = ExtensionPointName<GrazieCloudConnector>("com.intellij.grazie.cloudConnector")
+    private val EP_NAME: ExtensionPointName<GrazieCloudConnector> = ExtensionPointName("com.intellij.grazie.cloudConnector")
 
-    fun seemsCloudConnected(): Boolean = EP_NAME.extensionList.any { it.seemsCloudConnected() }
+    fun hasAdditionalConnectors(): Boolean = EP_NAME.extensionList.size > 1
+
+    fun isAuthorized(): Boolean = EP_NAME.extensionList.first().isAuthorized()
+
+    /**
+     * Returns true if there is a connection to Grazie Cloud and processing is [Processing.Cloud].
+     */
+    fun seemsCloudConnected(): Boolean {
+      val connector = EP_NAME.extensionList.first()
+      return connector.isAuthorized() && GrazieConfig.get().processing == Processing.Cloud
+    }
+
+    fun connect(project: Project): Boolean =
+      EP_NAME.extensionList.first().connect(project)
+
+    fun isCloudEnabledByDefault(): Boolean = EP_NAME.extensionList.first().isCloudEnabledByDefault()
+
+    fun askUserConsentForCloud(): Boolean = EP_NAME.extensionList.first().askUserConsentForCloud()
+
+    fun isAfterRecentGecError(): Boolean = GrazieCloudConnectionState.isAfterRecentGecError()
+
+    fun api(): SuspendableAPIGatewayClient? = EP_NAME.extensionList.first().api()
+
+    fun subscribeToAuthorizationStateEvents(disposable: Disposable, listener: () -> Unit): Unit =
+      EP_NAME.forEachExtensionSafe { it.subscribeToAuthorizationStateEvents(disposable, listener) }
   }
 }

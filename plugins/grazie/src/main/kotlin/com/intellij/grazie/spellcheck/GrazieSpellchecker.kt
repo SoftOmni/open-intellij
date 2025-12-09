@@ -14,16 +14,15 @@ import com.intellij.grazie.utils.TextStyleDomain
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ex.ApplicationUtil
 import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.ClassLoaderUtil
+import com.intellij.openapi.util.ClassLoaderUtil.computeWithClassLoader
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.spellchecker.dictionary.Dictionary
 import com.intellij.spellchecker.dictionary.Dictionary.LookupStatus.*
-import com.intellij.spellchecker.grazie.SpellcheckerLifecycle
+import com.intellij.util.io.computeDetached
 import kotlinx.coroutines.*
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
@@ -31,12 +30,6 @@ import org.languagetool.JLanguageTool
 import org.languagetool.rules.spelling.SpellingCheckRule
 import java.nio.file.Files
 import java.util.concurrent.Callable
-
-internal class GrazieSpellcheckerLifecycle : SpellcheckerLifecycle {
-  override suspend fun preload(project: Project) {
-    serviceAsync<GrazieCheckers>()
-  }
-}
 
 @ApiStatus.Internal
 @Service(Service.Level.APP)
@@ -50,7 +43,7 @@ class GrazieCheckers(coroutineScope: CoroutineScope) : GrazieStateLifecycle {
   }
 
   private fun filterCheckers(word: String): Set<SpellerTool> {
-    val checkers = this.checkers
+    val checkers = heavyInit()
     if (checkers.isEmpty()) {
       return emptySet()
     }
@@ -68,7 +61,7 @@ class GrazieCheckers(coroutineScope: CoroutineScope) : GrazieStateLifecycle {
     fun check(word: String): Boolean? = synchronized(speller) {
       if (word.isBlank()) return true
 
-      ClassLoaderUtil.computeWithClassLoader<Boolean, Throwable>(GraziePlugin.classLoader) {
+      computeWithClassLoader<Boolean, Throwable>(GraziePlugin.classLoader) {
         if (speller.match(tool.getRawAnalyzedSentence(word)).isEmpty()) {
           if (!speller.isMisspelled(word)) true
           else {
@@ -84,7 +77,7 @@ class GrazieCheckers(coroutineScope: CoroutineScope) : GrazieStateLifecycle {
     }
 
     fun suggest(text: String): Set<String> = synchronized(speller) {
-      ClassLoaderUtil.computeWithClassLoader<Set<String>, Throwable>(GraziePlugin.classLoader) {
+      computeWithClassLoader<Set<String>, Throwable>(GraziePlugin.classLoader) {
         speller.match(tool.getRawAnalyzedSentence(text))
           .flatMap { match ->
             match.suggestedReplacements.map {
@@ -97,7 +90,7 @@ class GrazieCheckers(coroutineScope: CoroutineScope) : GrazieStateLifecycle {
   }
 
   @Volatile
-  private var checkers: Collection<SpellerTool> = heavyInit()
+  private var checkers: Set<SpellerTool>? = null
 
   @OptIn(ExperimentalCoroutinesApi::class)
   private val configurationScope = coroutineScope.childScope("ConfigurationChanged", Dispatchers.Default.limitedParallelism(1))
@@ -109,24 +102,35 @@ class GrazieCheckers(coroutineScope: CoroutineScope) : GrazieStateLifecycle {
   }
 
   // getService() enables cancellable code to be canceled even when init of service is a long operation
-  private fun heavyInit(): Collection<SpellerTool> {
-    val set = LinkedHashSet<SpellerTool>()
-    for (lang in GrazieConfig.get().availableLanguages) {
-      if (lang.isEnglish()) continue
+  @OptIn(DelicateCoroutinesApi::class)
+  private fun heavyInit(): Set<SpellerTool> {
+    val checkers = this.checkers
+    if (!checkers.isNullOrEmpty()) return checkers
 
-      val tool = LangTool.getTool(lang, TextStyleDomain.Other)
+    val langs = GrazieConfig.get().availableLanguages.filterNot { it.isEnglish() }
+    val set = LinkedHashSet<SpellerTool>()
+    for (lang in langs) {
+      val tool = runBlockingCancellable {
+        computeDetached {
+          LangTool.getTool(lang, TextStyleDomain.Other)
+        }
+      }
       tool.allSpellingCheckRules.firstOrNull()
         ?.let { set.add(SpellerTool(tool, lang, it)) }
     }
-
+    this.checkers = set
     return set
   }
 
   override fun update(prevState: GrazieConfig.State, newState: GrazieConfig.State) {
+    if (prevState.availableLanguages == newState.availableLanguages) return
+    checkers = null
     configurationScope.launch {
-      checkers = heavyInit()
+      heavyInit()
     }
   }
+
+  fun hasSpellerTool(langs: List<Lang>): Boolean = langs.any { lang -> checkers?.any { it.lang == lang } ?: false }
 
   fun lookup(word: String): Dictionary.LookupStatus {
     val myCheckers = filterCheckers(word)

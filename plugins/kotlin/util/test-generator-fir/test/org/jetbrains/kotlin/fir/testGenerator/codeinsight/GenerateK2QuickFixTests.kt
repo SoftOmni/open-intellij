@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.AbstractHighLevelQuickFixM
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.AbstractHighLevelQuickFixMultiModuleTest
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.AbstractHighLevelQuickFixTest
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.AbstractHighLevelWithPostponedQuickFixMultiModuleTest
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.AbstractK2KDocUnresolvedReferenceTest
 import org.jetbrains.kotlin.testGenerator.model.*
 import org.jetbrains.kotlin.testGenerator.model.GroupCategory.QUICKFIXES
 import org.jetbrains.kotlin.testGenerator.model.Patterns.DIRECTORY
@@ -38,7 +39,7 @@ internal fun MutableTWorkspace.generateK2FixTests() {
             model("$idea/quickfix/addIsToWhenCondition", pattern = pattern)
             model("$idea/quickfix/addJvmInline", pattern = pattern)
             model("$idea/quickfix/addJvmStaticAnnotation", pattern = pattern)
-            model("$idea/quickfix/addNewLineAfterAnnotations", pattern = pattern, isIgnored = true)
+            model("$idea/quickfix/addNewLineAfterAnnotations", pattern = pattern)
             model("$idea/quickfix/addNoinline", pattern = pattern)
             model("$idea/quickfix/addPropertyAccessors", pattern = pattern)
             model("$idea/quickfix/addReifiedToTypeParameterOfFunctionFix", pattern = pattern)
@@ -87,6 +88,7 @@ internal fun MutableTWorkspace.generateK2FixTests() {
             model("$idea/quickfix/deprecatedJavaAnnotation", pattern = pattern, isIgnored = true)
             model("$idea/quickfix/deprecatedSymbolUsage", pattern = pattern, isIgnored = false)
             model("$idea/quickfix/equalityNotApplicable", pattern = pattern)
+            model("$idea/quickfix/destructingShortForm", pattern = pattern)
             model("$idea/quickfix/explicitlyIgnoreReturnValue", pattern = pattern)
             model("$idea/quickfix/expressions", pattern = pattern)
             model("$idea/quickfix/final", pattern = pattern)
@@ -123,6 +125,7 @@ internal fun MutableTWorkspace.generateK2FixTests() {
             model("$idea/quickfix/moveToSealedParent", pattern = pattern, isIgnored = true)
             model("$idea/quickfix/moveTypeAliasToTopLevel", pattern = pattern)
             model("$idea/quickfix/namedLambdaContextParameter", pattern = pattern)
+            model("$idea/quickfix/navigateToConflictingDeclaration", pattern = pattern)
             model("$idea/quickfix/nullables", pattern = pattern)
             model("$idea/quickfix/obsoleteKotlinJsPackages", pattern = pattern, isIgnored = true)
             model("$idea/quickfix/optimizeImports", pattern = pattern, isIgnored = true)
@@ -141,6 +144,7 @@ internal fun MutableTWorkspace.generateK2FixTests() {
             model("$idea/quickfix/redundantModalityModifier", pattern = pattern)
             model("$idea/quickfix/redundantSuspend", pattern = pattern, isIgnored = true)
             model("$idea/quickfix/redundantVisibilityModifier", pattern = pattern)
+            model("$idea/quickfix/removeRedundantReturn", pattern = pattern)
             model("$idea/quickfix/removeAnnotation", pattern = pattern, isIgnored = true)
             model("$idea/quickfix/removeArgument", pattern = pattern)
             model("$idea/quickfix/removeAtFromAnnotationArgument", pattern = pattern)
@@ -168,6 +172,7 @@ internal fun MutableTWorkspace.generateK2FixTests() {
             model("$idea/quickfix/replaceWithArrayCallInAnnotation", pattern = pattern)
             model("$idea/quickfix/replaceWithDotCall", pattern = pattern)
             model("$idea/quickfix/replaceWithSafeCall", pattern = pattern)
+            model("$idea/quickfix/returnInExpressionBody", pattern = pattern)
             model("$idea/quickfix/restrictedRetentionForExpressionAnnotation", pattern = pattern)
             model("$idea/quickfix/runBlockingInSuspendFunction", pattern = pattern)
             model("$idea/quickfix/addVarianceModifier", pattern = pattern)
@@ -282,6 +287,12 @@ internal fun MutableTWorkspace.generateK2FixTests() {
 
         testClass<AbstractHighLevelWithPostponedQuickFixMultiModuleTest> {
             model("$idea/multiModuleQuickFix/addDependency", pattern = DIRECTORY, isRecursive = false)
+        }
+    }
+
+    testGroup("code-insight/fixes-k2/tests", category = QUICKFIXES, testDataPath = "../..") {
+        testClass<AbstractK2KDocUnresolvedReferenceTest> {
+            model("testData/quickFixes/kdocUnresolvedReference", pattern = KT_WITHOUT_DOTS)
         }
     }
 }

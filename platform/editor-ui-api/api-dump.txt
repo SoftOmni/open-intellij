@@ -332,6 +332,7 @@ f:com.intellij.ide.ui.UISettings
 - f:getCycleScrolling():Z
 - sf:getDefFontScale():F
 - sf:getDefFontSize():F
+- f:getDifferentToolwindowBackground():Z
 - f:getDifferentiateProjects():Z
 - f:getDisableMnemonics():Z
 - f:getDisableMnemonicsInControls():Z
@@ -419,6 +420,7 @@ f:com.intellij.ide.ui.UISettings
 - f:setConsoleCommandHistoryLimit(I):V
 - f:setConsoleCycleBufferSizeKb(I):V
 - f:setCurrentIdeScale(F):V
+- f:setDifferentToolwindowBackground(Z):V
 - f:setDifferentiateProjects(Z):V
 - f:setDisableMnemonics(Z):V
 - f:setDisableMnemonicsInControls(Z):V
@@ -1348,6 +1350,7 @@ com.intellij.openapi.editor.Editor
 - addEditorMouseListener(com.intellij.openapi.editor.event.EditorMouseListener,com.intellij.openapi.Disposable):V
 - a:addEditorMouseMotionListener(com.intellij.openapi.editor.event.EditorMouseMotionListener):V
 - addEditorMouseMotionListener(com.intellij.openapi.editor.event.EditorMouseMotionListener,com.intellij.openapi.Disposable):V
+- asModNavigator():com.intellij.openapi.editor.ModNavigator
 - calculateVisibleRange():com.intellij.openapi.util.ProperTextRange
 - getAscent():I
 - a:getCaretModel():com.intellij.openapi.editor.CaretModel
@@ -1422,6 +1425,8 @@ Fa:com.intellij.openapi.editor.EditorFactory
 - a:addEditorFactoryListener(com.intellij.openapi.editor.event.EditorFactoryListener):V
 - a:addEditorFactoryListener(com.intellij.openapi.editor.event.EditorFactoryListener,com.intellij.openapi.Disposable):V
 - a:createDocument(java.lang.CharSequence):com.intellij.openapi.editor.Document
+- a:createDocument(java.lang.CharSequence,Z,Z):com.intellij.openapi.editor.Document
+- a:createDocument(Z):com.intellij.openapi.editor.Document
 - a:createDocument(C[]):com.intellij.openapi.editor.Document
 - a:createEditor(com.intellij.openapi.editor.Document):com.intellij.openapi.editor.Editor
 - a:createEditor(com.intellij.openapi.editor.Document,com.intellij.openapi.project.Project):com.intellij.openapi.editor.Editor
@@ -1485,6 +1490,7 @@ com.intellij.openapi.editor.EditorSettings
 - a:isAdditionalPageAtBottom():Z
 - a:isAllSoftWrapsShown():Z
 - a:isAllowSingleLogicalLineFolding():Z
+- a:isAnimatedCaret():Z
 - a:isAnimatedScrolling():Z
 - a:isAutoCodeFoldingEnabled():Z
 - a:isBlinkCaret():Z

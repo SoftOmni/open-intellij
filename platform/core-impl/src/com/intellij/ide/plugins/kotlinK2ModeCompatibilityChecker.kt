@@ -9,7 +9,7 @@ import java.io.IOException
 
 private val pluginIdsToIgnoreK2KotlinCompatibility: Set<String> = buildSet {
   System.getProperty("idea.kotlin.plugin.plugin.ids.to.ignore.k2.compatibility")?.split(',')?.mapTo(this) { it.trim() }
-  addAll(listOf("fleet.backend.kotlin", "fleet.backend.mercury"))
+  addAll(listOf("fleet.backend.kotlin"))
 
   try {
     // KTIJ-30545
@@ -62,7 +62,7 @@ private fun getSupportKotlinPluginModeEPs(plugin: IdeaPluginDescriptorImpl): Lis
 
 
 internal fun isKotlinPluginK2Mode(): Boolean {
-  return System.getProperty("idea.kotlin.plugin.use.k2", "false").toBoolean()
+  return System.getProperty("idea.kotlin.plugin.use.k1", "false").toBoolean().not()
 }
 
 @ApiStatus.Internal

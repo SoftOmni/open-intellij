@@ -6,6 +6,7 @@ import com.intellij.platform.project.ProjectId
 import com.intellij.platform.rpc.RemoteApiProviderService
 import com.intellij.platform.scopes.SearchScopesInfo
 import com.intellij.platform.searchEverywhere.*
+import com.intellij.platform.searchEverywhere.presentations.SeItemPresentation
 import com.intellij.platform.searchEverywhere.providers.SeSortedProviderIds
 import com.intellij.platform.searchEverywhere.providers.target.SeTypeVisibilityStatePresentation
 import fleet.rpc.RemoteApi
@@ -124,6 +125,22 @@ interface SeRemoteApi : RemoteApi<Unit> {
 
 
   suspend fun isPreviewEnabled(
+    projectId: ProjectId,
+    session: SeSession,
+    dataContextId: DataContextId,
+    providerIds: List<SeProviderId>,
+    isAllTab: Boolean,
+  ): Boolean
+
+  suspend fun isExtendedInfoEnabled(
+    projectId: ProjectId,
+    session: SeSession,
+    dataContextId: DataContextId,
+    providerIds: List<SeProviderId>,
+    isAllTab: Boolean,
+  ): Boolean
+
+  suspend fun isCommandsSupported(
     projectId: ProjectId,
     session: SeSession,
     dataContextId: DataContextId,

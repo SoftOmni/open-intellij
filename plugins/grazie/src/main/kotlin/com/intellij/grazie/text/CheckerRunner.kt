@@ -2,6 +2,7 @@
 
 package com.intellij.grazie.text
 
+import ai.grazie.nlp.langs.Language
 import ai.grazie.nlp.tokenizer.Tokenizer
 import ai.grazie.nlp.tokenizer.sentence.StandardSentenceTokenizer
 import ai.grazie.utils.toLinkedSet
@@ -15,14 +16,16 @@ import com.intellij.grazie.GrazieConfig
 import com.intellij.grazie.ide.fus.AcceptanceRateTracker
 import com.intellij.grazie.ide.fus.GrazieFUSCounter
 import com.intellij.grazie.ide.inspection.grammar.GrazieInspection
-import com.intellij.grazie.ide.inspection.grammar.quickfix.GrazieAddExceptionQuickFix
-import com.intellij.grazie.ide.inspection.grammar.quickfix.GrazieCustomFixWrapper
-import com.intellij.grazie.ide.inspection.grammar.quickfix.GrazieReplaceTypoQuickFix
-import com.intellij.grazie.ide.inspection.grammar.quickfix.GrazieRuleSettingsAction
+import com.intellij.grazie.ide.inspection.grammar.quickfix.*
 import com.intellij.grazie.ide.language.LanguageGrammarChecking
+import com.intellij.grazie.text.TextChecker.ProofreadingContext
+import com.intellij.grazie.utils.HighlightingUtil
+import com.intellij.grazie.utils.NaturalTextDetector.seemsNatural
 import com.intellij.grazie.utils.getTextDomain
+import com.intellij.grazie.utils.toProofreadingContext
 import com.intellij.lang.annotation.ProblemGroup
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.runBlockingCancellable
@@ -36,10 +39,14 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.parents
 import com.intellij.psi.util.startOffset
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.yield
 import org.jetbrains.annotations.ApiStatus
 
 private val problemsKey = Key.create<CachedResults>("grazie.text.problems")
+private val LOG = Logger.getInstance(CheckerRunner::class.java)
 
 class CheckerRunner(val text: TextContent) {
   private val tokenizer
@@ -58,10 +65,15 @@ class CheckerRunner(val text: TextContent) {
   }
 
   fun run(): List<TextProblem> {
+    if (text.isBlank() || !seemsNatural(text)) return emptyList()
+
+    val context = text.toProofreadingContext()
+    if (context.language == Language.UNKNOWN || HighlightingUtil.findInstalledLang(context.language) == null) return emptyList()
+
     val configStamp = service<GrazieConfig>().modificationCount
     var cachedProblems = getCachedProblems(configStamp)
     if (cachedProblems != null) return cachedProblems
-    cachedProblems = filter(doRun(TextChecker.allCheckers()))
+    cachedProblems = filter(doRun(TextChecker.allCheckers(), context))
     text.putUserData(problemsKey, CachedResults(configStamp, cachedProblems))
     return cachedProblems
   }
@@ -95,12 +107,12 @@ class CheckerRunner(val text: TextContent) {
    * In the end, we still collect the results in the checker registration order
    * so that problems from the first checkers can override intersecting problems from others.
    */
-  private fun doRun(checkers: List<TextChecker>): List<TextProblem> {
+  private fun doRun(checkers: List<TextChecker>, context: ProofreadingContext): List<TextProblem> {
     return runBlockingCancellable {
       val deferred = checkers.map { checker ->
         when (checker) {
-          is ExternalTextChecker -> async { checker.checkExternally(text) }
-          else -> async(start = CoroutineStart.LAZY) { checker.check(text) }
+          is ExternalTextChecker -> async { checker.checkExternally(context) }
+          else -> async(start = CoroutineStart.LAZY) { checker.check(context) }
         }
       }
       for (job in deferred) {
@@ -141,7 +153,9 @@ class CheckerRunner(val text: TextContent) {
     val tooltip = problem.tooltipTemplate
     val description = problem.getDescriptionTemplate(isOnTheFly)
     return fileHighlightRanges(problem).map { range ->
-      val grazieDescriptor = GrazieProblemDescriptor(parent, description, range.shiftLeft(parent.startOffset), isOnTheFly, tooltip)
+      val rangeInElement = range.shiftLeft(parent.startOffset)
+      validateRangeInElement(parent, rangeInElement, problem)
+      val grazieDescriptor = GrazieProblemDescriptor(parent, description, rangeInElement, isOnTheFly, tooltip)
       if (isOnTheFly) {
         grazieDescriptor.quickFixes = toFixes(problem, grazieDescriptor)
       }
@@ -149,6 +163,18 @@ class CheckerRunner(val text: TextContent) {
       val descriptor = ProblemDescriptorWithReporterName(grazieDescriptor, shortName)
       descriptor.problemGroup = ProblemGroup { shortName }
       descriptor
+    }
+  }
+
+  private fun validateRangeInElement(psi: PsiElement, rangeInElement: TextRange?, problem: TextProblem) {
+    if (rangeInElement != null && psi.textRange != null) {
+      TextRange.assertProperRange(rangeInElement)
+      val psiTextLength = psi.textRange.length
+      if (rangeInElement.endOffset > psiTextLength) {
+        LOG.error("Argument rangeInElement ($rangeInElement) endOffset must not exceed descriptor text range " +
+                  "(${psi.textRange.startOffset}, ${psi.textRange.endOffset}) length ($psiTextLength). " +
+                  "PSI language: ${psi.language.id}, TextContent.fileRanges: ${problem.text.rangesInFile}")
+      }
     }
   }
 
@@ -248,15 +274,9 @@ class CheckerRunner(val text: TextContent) {
       }
     })
     result.add(GrazieRuleSettingsAction(problem.rule, problem.text.getTextDomain()))
+    result.add(GrazieMassApplyAction())
+    result.add(GrazieEnableCloudAction())
     return result.toTypedArray()
-  }
-
-  private fun fileHighlightRanges(problem: TextProblem): List<TextRange> {
-    return problem.highlightRanges.asSequence()
-      .map { text.textRangeToFile(it) }
-      .flatMap { range -> text.intersection(range) }
-      .filterNot { it.isEmpty }
-      .toList()
   }
 
   // used in rider
@@ -272,6 +292,17 @@ class CheckerRunner(val text: TextContent) {
 
   private fun highlightSpan(problem: TextProblem) =
     TextRange(problem.highlightRanges[0].startOffset, problem.highlightRanges.last().endOffset)
+
+  companion object {
+    @JvmStatic
+    fun fileHighlightRanges(problem: TextProblem): List<TextRange> {
+      return problem.highlightRanges.asSequence()
+        .map { problem.text.textRangeToFile(it) }
+        .flatMap { range -> problem.text.intersection(range) }
+        .filterNot { it.isEmpty }
+        .toList()
+    }
+  }
 }
 
 private data class CachedResults(val configStamp: Long, val problems: List<TextProblem>)

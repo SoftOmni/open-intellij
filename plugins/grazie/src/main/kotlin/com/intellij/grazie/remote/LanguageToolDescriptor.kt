@@ -6,37 +6,37 @@ import com.intellij.grazie.GraziePlugin
 import java.nio.file.Path
 import kotlin.io.path.Path
 
-// These checksums may be obtained by running the [GrazieLanguageBundleInfoTest]
-private const val EN_CHECKSUM = "2e9203fae17a9ddb06d8d3c938839b1f"
-private const val AR_CHECKSUM = "198102ddb7fb0e82f55b614f5331698c"
-private const val AST_CHECKSUM = "035b1fd0300ac8bb9f3cd92f5c4d6053"
-private const val BE_CHECKSUM = "9ae62f0a3ae58bd15fe0805f7b290ded"
-private const val BR_CHECKSUM = "d67702483b096aed7c84aff58d2a55e5"
-private const val CA_CHECKSUM = "c0dc683196d4226eb9b3bd9012efe1e8"
-private const val DA_CHECKSUM = "f766ddbc63fbdff8c2d618f49ee509ae"
-private const val DE_CHECKSUM = "5f3fd4ea163929b91d31ea5ae4babdf9"
-private const val EL_CHECKSUM = "76f45bc5d5a10e24d6e440b5be2e60df"
-private const val EO_CHECKSUM = "c0881778c4ae4fc295bd219ed4faadf1"
-private const val ES_CHECKSUM = "7ca45b7b076711fdfa72416896689b49"
-private const val FA_CHECKSUM = "94f48d55ab4b77a958602dbce92d6c40"
-private const val FR_CHECKSUM = "7390d20a793b7edb10a8e2ead955a670"
-private const val GA_CHECKSUM = "493ef9c451837be23389dd2a4e26995a"
-private const val GL_CHECKSUM = "00d3a0852d5225af6d6eb3aa5472c602"
-private const val IT_CHECKSUM = "9146dadc62e152c52b18e3cca83858e9"
-private const val JA_CHECKSUM = "1aa2218dc68d22311ae18d851644e1c9"
-private const val KM_CHECKSUM = "9405a60231b04f9087eec486bd3ac7d0"
-private const val NL_CHECKSUM = "5b4f8c7a96855387f92a9e7be3550d89"
-private const val PL_CHECKSUM = "50ddc50f9c7501587ee883c07f8643ee"
-private const val PT_CHECKSUM = "eed01398595ae36eeec12a6a9191c481"
-private const val RO_CHECKSUM = "0ff1d368c6955c2f3f95c92237db8047"
-private const val RU_CHECKSUM = "09c67dd65f8504ee1a06409f4dddc1be"
-private const val SK_CHECKSUM = "f74caebc32f8788293aa35315d6848a5"
-private const val SL_CHECKSUM = "87472cb969d1c7f5c94ffbb54b1a7584"
-private const val SV_CHECKSUM = "ae6bbe4b002e52b92ecafe92bf3b746d"
-private const val TA_CHECKSUM = "d07ce086e403c27139dd4c2b1b4845bf"
-private const val TL_CHECKSUM = "71ddfc04ddfd6db883cd11def056160d"
-private const val UK_CHECKSUM = "e0c03bb65f8fc56188f99b336a5c4b64"
-private const val ZH_CHECKSUM = "2eecd6b4301566d6cd1f1d5b14f9f7e3"
+// These checksums may be obtained by running the [LanguageToolBundleInfoTest]
+private const val EN_CHECKSUM = "f28fffcc56940fc16c09c0eecf0c3075"
+private const val AR_CHECKSUM = "76d8a89b82d2ff89e5eb618ac4e1fd32"
+private const val AST_CHECKSUM = "82a1313b03f8dad77eee9ee8ef92fe6b"
+private const val BE_CHECKSUM = "6bd01b047e384d7d06681d1dcbfd5047"
+private const val BR_CHECKSUM = "4abe80b539d1b85098fd04ea16be45a8"
+private const val CA_CHECKSUM = "bfb325538540296a0581fd68e0259bac"
+private const val DA_CHECKSUM = "5179df8338841a4f90405a084c72dfb1"
+private const val DE_CHECKSUM = "bb2e39791fd4625fc3d1fbf77bed13a8"
+private const val EL_CHECKSUM = "5de528913cc249144d6bd97ce7a4163a"
+private const val EO_CHECKSUM = "9ccd5a61af03a3d5df9741c78a46657f"
+private const val ES_CHECKSUM = "a298d602237a61e589269625ff3dca8b"
+private const val FA_CHECKSUM = "a9289a824a7aea7f3625343e32f3f1e4"
+private const val FR_CHECKSUM = "f1e2595b1c33bdac58c1ffdf6505b5a8"
+private const val GA_CHECKSUM = "0dfd2492d9194a87a08e4dc83e8b7cbf"
+private const val GL_CHECKSUM = "06487e79a4462def4c57b117b397c8f3"
+private const val IT_CHECKSUM = "fa1caf73d4ed5269bc17e8125cabd733"
+private const val JA_CHECKSUM = "b5a5436c6e376708e1d6c85d90f7e712"
+private const val KM_CHECKSUM = "841339951b8b2aa34e207b243eab5cce"
+private const val NL_CHECKSUM = "cfd303c1e351972a9af87f49aadaabba"
+private const val PL_CHECKSUM = "52bd0eecec2d402c640d6d9e5f92214a"
+private const val PT_CHECKSUM = "92202ab1b1e805960dcbdb3ab9d7cdea"
+private const val RO_CHECKSUM = "dd53ef38173ae11a6d456e95596db4d6"
+private const val RU_CHECKSUM = "7249590c1869d4fdf88644c197b6273d"
+private const val SK_CHECKSUM = "438e9358408aa030ac3b7ee91ed7b7d2"
+private const val SL_CHECKSUM = "07b30b188f5200fc5b313a069294b03b"
+private const val SV_CHECKSUM = "ab0bf98e78491e5b7ae9b2b988cc4515"
+private const val TA_CHECKSUM = "eb6d7f8f5ecf5a1ab8705d9bc70e3eab"
+private const val TL_CHECKSUM = "4b82afabb4100591262abee4163eca0a"
+private const val UK_CHECKSUM = "6bf7fe211a882c610d9e11acd586a164"
+private const val ZH_CHECKSUM = "73fd40d4dbd5315caa727b1ffe68705f"
 
 enum class LanguageToolDescriptor(
   val langsClasses: List<String>,
@@ -53,7 +53,7 @@ enum class LanguageToolDescriptor(
   GERMAN(listOf("GermanyGerman", "AustrianGerman", "SwissGerman"), 20, LanguageISO.DE, DE_CHECKSUM),
   GREEK(listOf("Greek"), 1, LanguageISO.EL, EL_CHECKSUM),
   ENGLISH(
-    listOf("BritishEnglish", "AmericanEnglish", "CanadianEnglish"),
+    listOf("BritishEnglish", "AmericanEnglish", "CanadianEnglish", "AustralianEnglish"),
     16,
     LanguageISO.EN,
     EN_CHECKSUM

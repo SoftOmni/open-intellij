@@ -1,4 +1,4 @@
-<idea-plugin package="com.intellij.notebooks.visualization">
+<idea-plugin visibility="internal" package="com.intellij.notebooks.visualization">
   <dependencies>
     <module name="intellij.notebooks.ui"/>
     <plugin id="org.intellij.plugins.markdown"/>
@@ -91,6 +91,8 @@
                  description="Enables floating toolbar for markdown cells"
                  key="jupyter.markdown.cells.floating.toolbar"
                  restartRequired="false"/>
+
+    <registryKey key="jupyter.diff.viewer.output" defaultValue="false" description="Show outputs in the Jupyter diff viewer"/>
 
     <textEditorCustomizer implementation="com.intellij.notebooks.visualization.ui.NotebookFloatingToolbarCustomizer"/>
   </extensions>

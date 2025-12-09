@@ -8,23 +8,27 @@ import com.intellij.execution.configurations.RuntimeConfigurationWarning
 import com.intellij.execution.target.TargetEnvironmentRequest
 import com.intellij.execution.target.value.TargetEnvironmentFunction
 import com.intellij.execution.testframework.AbstractTestProxy
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.psi.PsiManager
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.extensions.getQName
 import com.jetbrains.python.packaging.management.PythonPackageManager
-import com.jetbrains.python.packaging.management.hasInstalledPackage
+import com.jetbrains.python.packaging.management.hasInstalledPackageSnapshot
 import com.jetbrains.python.psi.PyClass
 import com.jetbrains.python.psi.PyFile
 import com.jetbrains.python.psi.PyFunction
 import com.jetbrains.python.run.AbstractPythonRunConfiguration
 import com.jetbrains.python.testing.AbstractPythonTestRunConfiguration.Companion.TEST_NAME_PARTS_SPLITTER
 import org.jetbrains.annotations.ApiStatus.Internal
+
 
 /**
  * Parent of all test configurations
@@ -118,6 +122,7 @@ protected constructor(project: Project, factory: ConfigurationFactory, private v
   /**
    * Check if framework is available on SDK
    */
+  @RequiresBlockingContext
   fun isFrameworkInstalled(): Boolean {
     val sdk = sdk
     if (sdk == null) {
@@ -126,10 +131,12 @@ protected constructor(project: Project, factory: ConfigurationFactory, private v
       return false
     }
     val requiredPackage = this.requiredPackage ?: return true // Installed by default
-    val isInstalled = runBlockingMaybeCancellable {
-      PythonPackageManager.forSdk(project, sdk).hasInstalledPackage(requiredPackage)
+    val hasInstalledPackage = { PythonPackageManager.forSdk(project, sdk).hasInstalledPackageSnapshot(requiredPackage) }
+
+    if (ApplicationManager.getApplication().isDispatchThread()) {
+      return runWithModalProgressBlocking(project, PyBundle.message("progress.title.checking.test.framework")) { hasInstalledPackage() }
     }
-    return isInstalled
+    return runBlockingMaybeCancellable { hasInstalledPackage() }
   }
 
 
@@ -138,6 +145,6 @@ protected constructor(project: Project, factory: ConfigurationFactory, private v
      * When passing path to test to runners, you should join parts with this char.
      * I.e.: file.py::PyClassTest::test_method
      */
-    protected const val TEST_NAME_PARTS_SPLITTER = "::"
+    protected const val TEST_NAME_PARTS_SPLITTER: String = "::"
   }
 }

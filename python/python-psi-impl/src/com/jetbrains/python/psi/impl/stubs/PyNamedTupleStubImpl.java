@@ -33,7 +33,9 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
 
 import static com.jetbrains.python.psi.PyUtil.as;
 import static com.jetbrains.python.psi.impl.PyPsiUtils.flattenParens;
@@ -153,16 +155,17 @@ public final class PyNamedTupleStubImpl implements PyNamedTupleStub {
     return null;
   }
 
-  private static @Nullable LinkedHashMap<String, FieldTypeAndHasDefault> resolveTupleFields(@NotNull PyCallExpression callExpression, @NotNull NamedTupleModule module) {
+  private static @Nullable LinkedHashMap<String, FieldTypeAndHasDefault> resolveTupleFields(@NotNull PyCallExpression callExpression,
+                                                                                            @NotNull NamedTupleModule module) {
     return switch (module) {
       case TYPING -> resolveTypingNTFields(callExpression);
       case COLLECTIONS -> resolveCollectionsNTFields(callExpression);
     };
   }
 
-  private static @NotNull LinkedHashMap<String, FieldTypeAndHasDefault>  deserializeFields(@NotNull StubInputStream stream, int fieldsSize)
+  private static @NotNull LinkedHashMap<String, FieldTypeAndHasDefault> deserializeFields(@NotNull StubInputStream stream, int fieldsSize)
     throws IOException {
-    final LinkedHashMap<String, FieldTypeAndHasDefault>  fields = new LinkedHashMap<>(fieldsSize);
+    final LinkedHashMap<String, FieldTypeAndHasDefault> fields = new LinkedHashMap<>(fieldsSize);
 
     for (int i = 0; i < fieldsSize; i++) {
       final String name = stream.readNameString();
@@ -207,8 +210,8 @@ public final class PyNamedTupleStubImpl implements PyNamedTupleStub {
 
     final PyExpression defaults = getDefaultsArgumentValue(callExpression);
     final PyExpression resolvedDefaults = defaults instanceof PyReferenceExpression
-                                        ? PyResolveUtil.fullResolveLocally((PyReferenceExpression)defaults)
-                                        : defaults;
+                                          ? PyResolveUtil.fullResolveLocally((PyReferenceExpression)defaults)
+                                          : defaults;
     int defaultStart = fieldNames.size();
     if (resolvedDefaults instanceof PySequenceExpression seq) {
       defaultStart -= seq.getElements().length;
@@ -216,7 +219,7 @@ public final class PyNamedTupleStubImpl implements PyNamedTupleStub {
 
     LinkedHashMap<String, FieldTypeAndHasDefault> result = new LinkedHashMap<>(fieldNames.size());
     for (int i = 0; i < fieldNames.size(); i++) {
-      if (PyNames.PY3_KEYWORDS.contains(fieldNames.get(i))) {
+      if (PyNames.PY3_KEYWORDS.contains(fieldNames.get(i)) || fieldNames.get(i).startsWith(PyNames.UNDERSCORE)) {
         fieldNames.set(i, "_" + i);
       }
       result.put(fieldNames.get(i), new FieldTypeAndHasDefault(null, i >= defaultStart));

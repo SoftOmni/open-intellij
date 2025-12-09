@@ -30,12 +30,18 @@ jvm_library(
     "//plugins/gradle/tooling-extension-impl:toolingExtension-impl",
     "@lib//:gradle",
     "//platform/object-serializer:objectSerializer-annotations",
-    "@lib//:commons-lang3",
+    "//libraries/commons/lang3",
   ]
 )
 ### auto-generated section `build intellij.gradle.native.tooling` end
 
 ### auto-generated section `build intellij.gradle.native.tooling.tests` start
+jvm_library(
+  name = "gradle-native-tooling-tests",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True)
+)
+
 jvm_library(
   name = "gradle-native-tooling-tests_test_lib",
   module_name = "intellij.gradle.native.tooling.tests",

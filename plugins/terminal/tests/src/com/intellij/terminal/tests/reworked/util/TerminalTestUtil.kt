@@ -10,31 +10,32 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.terminal.TerminalEngine
 import org.jetbrains.plugins.terminal.TerminalOptionsProvider
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModelImpl
-import org.jetbrains.plugins.terminal.session.StyleRange
-import org.jetbrains.plugins.terminal.session.TerminalOutputModelState
+import org.jetbrains.plugins.terminal.session.impl.StyleRange
+import org.jetbrains.plugins.terminal.session.impl.TerminalOutputModelState
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModel
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModelImpl
+import kotlin.reflect.KMutableProperty0
 
 @ApiStatus.Internal
 object TerminalTestUtil {
-  fun createOutputModel(maxLength: Int = 0): TerminalOutputModelImpl {
+  fun createOutputModel(maxLength: Int = 0): MutableTerminalOutputModelImpl {
     val document = DocumentImpl("", true)
-    return TerminalOutputModelImpl(document, maxLength)
+    return MutableTerminalOutputModelImpl(document, maxLength)
   }
 
-  suspend fun TerminalOutputModel.update(absoluteLineIndex: Long, text: String, styles: List<StyleRange> = emptyList()) {
+  suspend fun MutableTerminalOutputModel.update(absoluteLineIndex: Long, text: String, styles: List<StyleRange> = emptyList()) {
     updateOutputModel { updateContent(absoluteLineIndex, text, styles) }
   }
 
-  suspend fun TerminalOutputModel.replace(relativeStartOffset: Int, length: Int, text: String, styles: List<StyleRange> = emptyList()) {
-    updateOutputModel { replaceContent(relativeOffset(relativeStartOffset), length, text, styles) }
+  suspend fun MutableTerminalOutputModel.replace(relativeStartOffset: Int, length: Int, text: String, styles: List<StyleRange> = emptyList()) {
+    updateOutputModel { replaceContent(startOffset + relativeStartOffset.toLong(), length, text, styles) }
   }
 
-  suspend fun TerminalOutputModel.updateCursor(absoluteLineIndex: Long, column: Int) {
+  suspend fun MutableTerminalOutputModel.updateCursor(absoluteLineIndex: Long, column: Int) {
     updateOutputModel { updateCursorPosition(absoluteLineIndex, column) }
   }
 
-  suspend fun TerminalOutputModel.restore(state: TerminalOutputModelState) {
+  suspend fun MutableTerminalOutputModel.restore(state: TerminalOutputModelState) {
     updateOutputModel { restoreFromState(state) }
   }
 
@@ -53,6 +54,14 @@ object TerminalTestUtil {
     options.terminalEngine = engine
     Disposer.register(parentDisposable) {
       options.terminalEngine = prevValue
+    }
+  }
+
+  fun <V> KMutableProperty0<V>.setValueInTest(newValue: V, disposable: Disposable) {
+    val prevValue = this.get()
+    this.set(newValue)
+    Disposer.register(disposable) {
+      this.set(prevValue)
     }
   }
 }

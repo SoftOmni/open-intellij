@@ -11,7 +11,6 @@ import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.ContextHelpLabel
 import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.SimpleListCellRenderer
@@ -30,6 +29,7 @@ import com.intellij.util.IconUtil
 import com.intellij.util.MathUtil
 import com.intellij.util.ui.JBEmptyBorder
 import com.intellij.util.ui.JBFont
+import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.ThreeStateCheckBox
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
@@ -98,7 +98,9 @@ internal open class RowImpl(private val dialogPanelConfig: DialogPanelConfig,
   }
 
   override fun <T : JComponent> scrollCell(component: T): CellImpl<T> {
-    return cellImpl(component, JBScrollPane(component))
+    val scrollPane = JBScrollPane(component)
+    scrollPane.minimumSize = JBUI.size(100, 60)
+    return cellImpl(component, scrollPane)
   }
 
   override fun placeholder(): PlaceholderImpl {
@@ -276,9 +278,7 @@ internal open class RowImpl(private val dialogPanelConfig: DialogPanelConfig,
   }
 
   override fun contextHelp(description: String, title: String?): CellImpl<JLabel> {
-    val result = if (title == null) ContextHelpLabel.create(description)
-    else ContextHelpLabel.create(title, description)
-    return cell(result)
+    return cell(createContextHelp(description, title))
   }
 
   override fun textField(): CellImpl<JBTextField> {

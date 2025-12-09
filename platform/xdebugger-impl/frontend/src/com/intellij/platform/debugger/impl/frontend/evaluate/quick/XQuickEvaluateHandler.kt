@@ -17,7 +17,7 @@ import com.intellij.xdebugger.impl.evaluate.quick.XValueHint
 import com.intellij.xdebugger.impl.evaluate.quick.common.AbstractValueHint
 import com.intellij.xdebugger.impl.evaluate.quick.common.QuickEvaluateHandler
 import com.intellij.xdebugger.impl.evaluate.quick.common.ValueHintType
-import com.intellij.xdebugger.impl.frame.XDebugManagerProxy
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugManagerProxy
 import com.intellij.xdebugger.settings.XDebuggerSettingsManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.future.asCompletableFuture
@@ -28,7 +28,7 @@ private val LOG = Logger.getInstance(XQuickEvaluateHandler::class.java)
 
 internal class XQuickEvaluateHandler : QuickEvaluateHandler() {
   override fun isEnabled(project: Project): Boolean {
-    val currentSession = FrontendXDebuggerManager.getInstance(project).currentSession.value
+    val currentSession = FrontendXDebuggerManager.getInstance(project).currentSession
     return currentSession != null && currentSession.currentEvaluator != null
   }
 
@@ -47,12 +47,12 @@ internal class XQuickEvaluateHandler : QuickEvaluateHandler() {
       XDebuggerValueLookupHintsRemoteApi.getInstance().adjustOffset(projectId, editorId, offset)
     }
     val expressionInfoDeferred = documentCoroutineScope.async(Dispatchers.IO) {
-      val adjustedOffset = adjustedOffsetDeferred.await()
+      val adjustedOffset = adjustedOffsetDeferred.await() ?: return@async null
       val remoteApi = XDebuggerValueLookupHintsRemoteApi.getInstance()
       remoteApi.getExpressionInfo(projectId, editorId, adjustedOffset, type)
     }
     val hintDeferred: Deferred<AbstractValueHint?> = documentCoroutineScope.async(Dispatchers.IO) {
-      val adjustedOffset = adjustedOffsetDeferred.await()
+      val adjustedOffset = adjustedOffsetDeferred.await() ?: return@async null
       val expressionInfo = expressionInfoDeferred.await()
       val textLength = document.textLength
       if (expressionInfo == null) {
@@ -70,7 +70,7 @@ internal class XQuickEvaluateHandler : QuickEvaluateHandler() {
       }
       else {
         val currentSession = if (frontendType is FrontendType.Remote) {
-          FrontendXDebuggerManager.getInstance(project).currentSession.value
+          FrontendXDebuggerManager.getInstance(project).currentSession
         }
         else {
           // Monolith case, we do not want to break plugins e.g., IJPL-176963

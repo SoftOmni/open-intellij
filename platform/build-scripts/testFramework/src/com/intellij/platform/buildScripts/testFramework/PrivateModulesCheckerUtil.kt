@@ -10,14 +10,16 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * Utility for checking that private plugin modules are not bundled in the build.
+ * Utility for checking that private plugin modules are not bundled or prepared to be published in the build.
  */
-suspend fun checkPrivatePluginModulesAreNotBundled(
+suspend fun checkPrivatePluginModulesAreNotPublic(
   context: BuildContext,
   softly: SoftAssertions,
 ) {
   val privateModules = getPrivateModules(context)
-  if (privateModules.isEmpty()) return
+  if (privateModules.isEmpty()) {
+    return
+  }
 
   val visited = mutableSetOf<JpsModule>()
   val bundledPrivateModules = context.productProperties.productLayout.bundledPluginModules.asSequence()
@@ -35,8 +37,19 @@ suspend fun checkPrivatePluginModulesAreNotBundled(
     .filter { privateModules.contains(it.name) }
     .toList()
 
+  // Also check modules in Maven artifacts
+  visited.clear()
+  val pluginModulesMavenArtifacts = context.productProperties.mavenArtifacts
+    .let { it.additionalModules + it.proprietaryModules }
+    .distinct()
+    .mapNotNull { context.findModule(it) }
+    .flatMap { it.transitiveDependencies(visited) }
+    .filter { privateModules.contains(it.name) }
+    .toList()
+
   softly.assertThat(bundledPrivateModules).`as`("No private modules should be included in bundledPluginModules").isEmpty()
   softly.assertThat(pluginLayoutsPrivateModules).`as`("No private modules should be included in pluginsToPublish").isEmpty()
+  softly.assertThat(pluginModulesMavenArtifacts).`as`("No private modules should be published as Maven artifacts").isEmpty()
 }
 
 /**
@@ -46,7 +59,7 @@ suspend fun checkPrivatePluginModulesAreNotBundled(
  */
 private fun getPrivateModules(context: BuildContext): Set<String> {
   val projectHome = context.paths.projectHome
-  val ultimateHome = BuildPaths.ULTIMATE_HOME
+  val ultimateHome = BuildPaths.MAYBE_ULTIMATE_HOME
 
   return when (projectHome) {
     ultimateHome -> readPrivateModulesFromFile(ultimateHome) // Ultimate project

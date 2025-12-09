@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework
 
+import _LastInSuiteTest
 import com.intellij.application.options.CodeStyle
 import com.intellij.codeInsight.AutoPopupController
 import com.intellij.codeInsight.lookup.LookupManager
@@ -96,7 +97,7 @@ class TestApplicationManager private constructor() {
             }
           },
           { CodeStyle.dropTemporarySettings(project) },
-          { WriteIntentReadAction.run<Nothing?> { UsefulTestCase.doPostponedFormatting(project) } },
+          { WriteIntentReadAction.runThrowable<Nothing?> { UsefulTestCase.doPostponedFormatting(project) } },
           { LookupManager.hideActiveLookup(project) },
           {
             if (isLightProject) {
@@ -112,10 +113,7 @@ class TestApplicationManager private constructor() {
             app.runWriteIntentReadAction<Unit, Nothing?> {
               WriteCommandAction.runWriteCommandAction(project) {
                 val fileDocumentManager = app.serviceIfCreated<FileDocumentManager, FileDocumentManagerImpl>()
-                if (fileDocumentManager != null) {
-                  fileDocumentManager.dropAllUnsavedDocuments()
-                  fileDocumentManager.clearDocumentCache()
-                }
+                fileDocumentManager?.prepareForNextTest()
               }
             }
           },
@@ -164,7 +162,7 @@ class TestApplicationManager private constructor() {
 
     /**
      * Call this method after the test to check whether project instances leak.
-     * This is done automatically on CI inside {@code _LastInSuiteTest.testProjectLeak}.
+     * This is done automatically on CI inside [_LastInSuiteTest.testProjectLeak].
      * However, you may want to add this check to a particular test to make sure 
      * whether it causes the leak or not.
      */

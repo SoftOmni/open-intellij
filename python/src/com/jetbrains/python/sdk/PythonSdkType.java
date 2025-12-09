@@ -24,10 +24,11 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.platform.ide.progress.ModalTaskOwner;
+import com.intellij.platform.ide.progress.TaskCancellation;
 import com.intellij.reference.SoftReference;
 import com.intellij.remote.ExceptionFix;
 import com.intellij.remote.ext.LanguageCaseCollector;
-import com.intellij.util.Consumer;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
@@ -43,9 +44,13 @@ import com.jetbrains.python.remote.PythonRemoteInterpreterManager;
 import com.jetbrains.python.sdk.add.PyAddSdkDialog;
 import com.jetbrains.python.sdk.flavors.CPythonSdkFlavor;
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
+import com.jetbrains.python.sdk.legacy.PythonSdkUtil;
 import com.jetbrains.python.target.PyDetectedSdkAdditionalData;
 import com.jetbrains.python.target.PyInterpreterVersionUtil;
 import com.jetbrains.python.target.PyTargetAwareAdditionalData;
+import kotlin.coroutines.Continuation;
+import kotlin.jvm.functions.Function2;
+import kotlinx.coroutines.CoroutineScope;
 import one.util.streamex.StreamEx;
 import org.jdom.Element;
 import org.jetbrains.annotations.*;
@@ -60,8 +65,10 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static com.intellij.execution.target.TargetBasedSdks.loadTargetConfiguration;
+import static com.intellij.platform.ide.progress.TasksKt.runWithModalProgressBlocking;
 import static com.jetbrains.python.statistics.PythonSDKUpdaterIdsHolder.REFRESH_SKELETONS_FOR_REMOTE_INTERPRETER_FAILED;
 
 /**
@@ -149,7 +156,19 @@ public final class PythonSdkType extends SdkType {
       public void validateSelectedFiles(VirtualFile @NotNull [] files) throws Exception {
         if (files.length != 0) {
           VirtualFile file = files[0];
-          if (!isLocatedInWsl(file) && !isLocalPathValid(file.toNioPath())) {
+
+          Boolean isValid = runWithModalProgressBlocking(
+            ModalTaskOwner.guess(), PyBundle.message("modal.progress.title.path.validation"), TaskCancellation.cancellable(),
+            new Function2<>() {
+              @Override
+              public Boolean invoke(CoroutineScope scope,
+                                    Continuation<? super Boolean> continuation) {
+                return isLocatedInWsl(file) || isLocalPathValid(file.toNioPath());
+              }
+            }
+          );
+
+          if (!isValid) {
             throw new Exception(PyBundle.message("python.sdk.error.invalid.interpreter.selected", file.getName()));
           }
         }
@@ -175,6 +194,7 @@ public final class PythonSdkType extends SdkType {
     return true;
   }
 
+  @ApiStatus.Internal
   @Override
   public void showCustomCreateUI(@NotNull SdkModel sdkModel,
                                  @NotNull JComponent parentComponent,
@@ -183,7 +203,7 @@ public final class PythonSdkType extends SdkType {
     Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(parentComponent));
     PyAddSdkDialog.show(project, null, sdk -> {
       sdk.putUserData(SDK_CREATOR_COMPONENT_KEY, new WeakReference<>(parentComponent));
-      sdkCreatedCallback.consume(sdk);
+      sdkCreatedCallback.accept(sdk);
     });
   }
 

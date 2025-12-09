@@ -1,14 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.codegen.impl.writer.classes
 
-import com.intellij.workspaceModel.codegen.deft.meta.ObjClass
-import com.intellij.workspaceModel.codegen.deft.meta.ObjProperty
-import com.intellij.workspaceModel.codegen.deft.meta.ValueType
+import com.intellij.workspaceModel.codegen.deft.meta.*
 import com.intellij.workspaceModel.codegen.impl.metadata.fullName
 import com.intellij.workspaceModel.codegen.impl.writer.*
 import com.intellij.workspaceModel.codegen.impl.writer.extensions.*
 import com.intellij.workspaceModel.codegen.impl.writer.fields.*
-import com.intellij.workspaceModel.codegen.impl.writer.fields.implWsDataFieldCode
 
 /**
  * - Soft links
@@ -70,7 +67,8 @@ fun ObjClass<*>.implWsDataClassCode(): String {
           collectionFields.forEach { field ->
             if (field.valueType is ValueType.Set<*>) {
               line("$fieldName.${field.name} = $fieldName.${field.name}.${StorageCollection.toMutableWorkspaceSet}()")
-            } else {
+            }
+            else {
               line("$fieldName.${field.name} = $fieldName.${field.name}.${StorageCollection.toMutableWorkspaceList}()")
             }
           }
@@ -88,17 +86,29 @@ fun ObjClass<*>.implWsDataClassCode(): String {
         val mandatoryFields = allFields.mandatoryFields()
         val constructor = mandatoryFields.joinToString(", ") { it.name }.let { if (it.isNotBlank()) "($it)" else "" }
         val optionalFields = noRefs.filterNot { it in mandatoryFields }
+        val parentFields = allRefsFields.filterNot { it.valueType.getRefType().child }
 
-        section("return $javaFullName$constructor") {
-          optionalFields.forEach {
-            line("this.${it.name} = this@$javaDataName.${it.name}")
-          }
-          allRefsFields.filterNot { it.valueType.getRefType().child }.forEach {
-            val parentType = it.valueType
-            if (parentType is ValueType.Optional) {
-              line("this.${it.name} = parents.filterIsInstance<${parentType.type.javaBuilderTypeWithGeneric}>().singleOrNull()")
-            } else {
-              line("parents.filterIsInstance<${parentType.javaBuilderTypeWithGeneric}>().singleOrNull()?.let { this.${it.name} = it }")
+        if (optionalFields.isEmpty() && parentFields.isEmpty()) {
+          line("return $javaFullName$constructor")
+        }
+        else {
+          section("return $javaFullName$constructor") {
+            optionalFields.forEach { field ->
+              val toMutable = when (field.valueType) {
+                is ValueType.List<*> -> ".${StorageCollection.toMutableWorkspaceList}()"
+                is ValueType.Set<*> -> ".${StorageCollection.toMutableWorkspaceSet}()"
+                else -> ""
+              }
+              line("this.${field.name} = this@$javaDataName.${field.name}$toMutable")
+            }
+            parentFields.forEach {
+              val parentType = it.valueType
+              if (parentType is ValueType.Optional) {
+                line("this.${it.name} = parents.filterIsInstance<${parentType.type.javaBuilderTypeWithGeneric}>().singleOrNull()")
+              }
+              else {
+                line("parents.filterIsInstance<${parentType.javaBuilderTypeWithGeneric}>().singleOrNull()?.let { this.${it.name} = it }")
+              }
             }
           }
         }

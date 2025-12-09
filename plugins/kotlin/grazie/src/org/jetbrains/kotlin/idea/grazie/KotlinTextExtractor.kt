@@ -7,6 +7,7 @@ import com.intellij.grazie.text.TextContentBuilder
 import com.intellij.grazie.text.TextExtractor
 import com.intellij.grazie.utils.Text
 import com.intellij.grazie.utils.getNotSoDistantSimilarSiblings
+import com.intellij.grazie.utils.replaceBackslashEscapedWhitespace
 import com.intellij.psi.PsiElement
 import com.intellij.psi.impl.source.tree.PsiCommentImpl
 import com.intellij.psi.util.elementType
@@ -30,7 +31,7 @@ internal class KotlinTextExtractor : TextExtractor() {
       if (root is KDocSection) {
         return kdocBuilder.excluding { e -> e is KDocTag && e != root }.build(root, DOCUMENTATION)?.removeCode()
       }
-      if (root is KDocTag) {
+      if (root is KDocTag && root.name != "author") {
         return kdocBuilder.excluding { e -> e.elementType == KDocTokens.TAG_NAME }.build(root, DOCUMENTATION)?.removeCode()
       }
     }
@@ -48,6 +49,7 @@ internal class KotlinTextExtractor : TextExtractor() {
           .withUnknown { it is KtStringTemplateEntryWithExpression }
           .removingIndents(" \t|").removingLineSuffixes(" \t")
           .build(root, LITERALS)
+          ?.replaceBackslashEscapedWhitespace()
     }
     return null
   }

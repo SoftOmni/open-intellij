@@ -4,14 +4,13 @@ package org.jetbrains.intellij.build.io
 import java.nio.file.AccessDeniedException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.DosFileAttributeView
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermission
-import java.util.ArrayDeque
+import java.util.*
 import java.util.zip.Deflater
 
 enum class AddDirEntriesMode {
@@ -187,22 +186,22 @@ class ZipArchiver(@JvmField val fileAdded: ((String, Path) -> Boolean)? = null) 
 }
 
 inline fun archiveDir(startDir: Path, addFile: (file: Path) -> Unit, excludes: List<PathMatcher>? = null) {
-  val dirCandidates = ArrayDeque<Path>()
-  dirCandidates.add(startDir)
-  val tempList = ArrayList<Path>()
+  if (Files.notExists(startDir)) {
+    return  // empty
+  }
+
+  val priorityQueue = PriorityQueue<Path>()
+  priorityQueue.add(startDir)
   while (true) {
-    val dir = dirCandidates.pollFirst() ?: break
-    tempList.clear()
-    val dirStream = try {
-      Files.newDirectoryStream(dir)
-    }
-    catch (_: NoSuchFileException) {
+    val path = priorityQueue.poll() ?: break  // preserve sorted order
+    if (!Files.isDirectory(path)) {
+      addFile(path)
       continue
     }
 
-    dirStream.use {
+    Files.newDirectoryStream(path).use {
       if (excludes == null) {
-        tempList.addAll(it)
+        priorityQueue.addAll(it)
       }
       else {
         l@ for (child in it) {
@@ -212,18 +211,8 @@ inline fun archiveDir(startDir: Path, addFile: (file: Path) -> Unit, excludes: L
               continue@l
             }
           }
-          tempList.add(child)
+          priorityQueue.add(child)
         }
-      }
-    }
-
-    tempList.sort()
-    for (file in tempList) {
-      if (Files.isDirectory(file)) {
-        dirCandidates.add(file)
-      }
-      else {
-        addFile(file)
       }
     }
   }

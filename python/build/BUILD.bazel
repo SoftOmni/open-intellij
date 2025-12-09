@@ -10,8 +10,8 @@ jvm_library(
     "//build",
     "@lib//:kotlin-stdlib",
     "//platform/util",
-    "@lib//:kotlinx-collections-immutable",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
+    "//libraries/kotlinx/coroutines/core",
     "//platform/build-scripts/downloader",
     "//build/tasks",
     "@lib//:opentelemetry",
@@ -23,7 +23,7 @@ jvm_library(
     "//python/python-sdk:sdk",
     "//python/python-parser:parser",
     "//jps/model-api:model",
-    "@lib//:jsoup",
+    "//libraries/jsoup",
   ]
 )
 
@@ -37,8 +37,8 @@ jvm_library(
     "//platform/build-scripts/testFramework",
     "@lib//:kotlin-stdlib",
     "//platform/util",
-    "@lib//:kotlinx-collections-immutable",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
+    "//libraries/kotlinx/coroutines/core",
     "//platform/build-scripts/downloader",
     "//build/tasks",
     "//build/tasks:tasks_test_lib",
@@ -53,7 +53,7 @@ jvm_library(
     "//python/python-sdk:sdk_test_lib",
     "//python/python-parser:parser",
     "//jps/model-api:model",
-    "@lib//:jsoup",
+    "//libraries/jsoup",
   ]
 )
 ### auto-generated section `build intellij.pycharm.community.build` end

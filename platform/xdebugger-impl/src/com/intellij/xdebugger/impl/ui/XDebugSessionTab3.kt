@@ -11,6 +11,8 @@ import com.intellij.ide.ui.customization.CustomActionsListener
 import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowAnchor
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy
+import com.intellij.platform.debugger.impl.ui.XDebuggerEntityConverter
 import com.intellij.toolWindow.InternalDecoratorImpl
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.content.Content
@@ -50,10 +52,10 @@ class XDebugSessionTab3(
   override fun getFramesContentId(): String = debuggerContentId
 
   private fun getWatchesViewImpl(sessionProxy: XDebugSessionProxy, watchesIsVariables: Boolean): XWatchesViewImpl {
-    if (sessionProxy is XDebugSessionProxy.Monolith) {
-      val session = sessionProxy.session
-      if (session.debugProcess.useSplitterView() && session is XDebugSessionImpl) { // TODO terekhin migrate Immediate window to using new debugger API
-        return XSplitterWatchesViewImpl(session, watchesIsVariables, true, withToolbar = false)
+    val xDebugSession = XDebuggerEntityConverter.getSessionNonSplitOnly(sessionProxy)
+    if (xDebugSession is XDebugSessionImpl) {
+      if (xDebugSession.debugProcess.useSplitterView()) { // TODO terekhin migrate Immediate window to using new debugger API
+        return XSplitterWatchesViewImpl(xDebugSession, watchesIsVariables, true, withToolbar = false)
       }
     }
     return XWatchesViewImpl(sessionProxy, watchesIsVariables, true, false)

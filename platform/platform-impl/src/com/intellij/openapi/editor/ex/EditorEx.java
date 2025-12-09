@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.editor.ex;
 
+import com.intellij.codeInsight.editorActions.TabOutScopesTracker;
 import com.intellij.ide.CopyProvider;
 import com.intellij.ide.CutProvider;
 import com.intellij.ide.DeleteProvider;
@@ -34,6 +35,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
 import com.intellij.util.ui.ButtonlessScrollBarUI;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.*;
@@ -43,6 +46,7 @@ import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.beans.PropertyChangeListener;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.function.IntFunction;
 
 public interface EditorEx extends Editor {
@@ -373,5 +377,45 @@ public interface EditorEx extends Editor {
   @ApiStatus.Experimental
   default int getStickyLinesPanelHeight() {
     return 0;
+  }
+
+  @Override
+  default @NotNull ModNavigator asModNavigator() {
+    return new ModNavigator() {
+      @Override
+      public @NotNull Document getDocument() {
+        return EditorEx.this.getDocument();
+      }
+
+      @Override
+      public @NotNull Project getProject() {
+        return Objects.requireNonNull(EditorEx.this.getProject());
+      }
+
+      @Override
+      public @NotNull PsiFile getPsiFile() {
+        return Objects.requireNonNull(PsiDocumentManager.getInstance(getProject()).getPsiFile(getDocument()));
+      }
+
+      @Override
+      public void select(@NotNull TextRange range) {
+        getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
+      }
+
+      @Override
+      public void moveCaretTo(int offset) {
+        getCaretModel().moveToOffset(offset);
+      }
+
+      @Override
+      public int getCaretOffset() {
+        return getCaretModel().getOffset();
+      }
+
+      @Override
+      public void registerTabOut(@NotNull TextRange range, int tabOutOffset) {
+        TabOutScopesTracker.getInstance().registerScopeRange(EditorEx.this, range.getStartOffset(), range.getEndOffset(), tabOutOffset);
+      }
+    };
   }
 }

@@ -27,7 +27,6 @@ import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.util.registry.RegistryManager;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.SystemProperties;
-import com.intellij.util.ThreeState;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.Decompressor;
@@ -39,11 +38,9 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -92,6 +89,7 @@ public final class PluginInstaller {
     if (pluginDescriptor.isBundled()) {
       throw new IllegalArgumentException("Plugin is bundled: " + pluginDescriptor.getPluginId());
     }
+    LOG.debug("Scheduling uninstallation of plugin " + pluginDescriptor + " after restart");
     // Make sure this method does not interfere with installAfterRestart by adding the DeleteCommand to the beginning of the script.
     // This way plugin installation always takes place after plugin uninstallation.
     addActionCommandsToBeginning(List.of(new DeleteCommand(pluginDescriptor.getPluginPath())));
@@ -100,7 +98,7 @@ public final class PluginInstaller {
   @ApiStatus.Internal
   public static boolean unloadDynamicPlugin(
     @Nullable JComponent parentComponent,
-    @NotNull IdeaPluginDescriptorImpl pluginDescriptor,
+    @NotNull PluginMainDescriptor pluginDescriptor,
     boolean isUpdate
   ) {
     var options = new DynamicPlugins.UnloadPluginOptions().withDisable(false).withWaitForClassloaderUnload(true).withUpdate(isUpdate);
@@ -112,7 +110,7 @@ public final class PluginInstaller {
   @ApiStatus.Internal
   public static boolean uninstallDynamicPlugin(
     @Nullable JComponent parentComponent,
-    @NotNull IdeaPluginDescriptorImpl pluginDescriptor,
+    @NotNull PluginMainDescriptor pluginDescriptor,
     boolean isUpdate
   ) {
     if (pluginDescriptor.isBundled()) {
@@ -122,6 +120,7 @@ public final class PluginInstaller {
     var uninstalledWithoutRestart = !pluginDescriptor.isEnabled() || unloadDynamicPlugin(parentComponent, pluginDescriptor, isUpdate);
     if (uninstalledWithoutRestart) {
       try {
+        LOG.debug("Deleting dynamic plugin from disk: " + pluginDescriptor.getPluginPath());
         NioFiles.deleteRecursively(pluginDescriptor.getPluginPath());
       }
       catch (IOException e) {
@@ -157,6 +156,7 @@ public final class PluginInstaller {
     @Nullable Path existingPlugin,
     boolean deleteSourceFile
   ) throws IOException {
+    LOG.debug("Scheduling installation of plugin " + descriptor + " after restart");
     var commands = new ArrayList<ActionCommand>();
 
     if (existingPlugin != null) {
@@ -204,6 +204,7 @@ public final class PluginInstaller {
   }
 
   public static @NotNull Path unpackPlugin(@NotNull Path sourceFile, @NotNull Path targetPath) throws IOException {
+    LOG.debug("Unpacking " + sourceFile + " to " + targetPath);
     Path target;
     if (sourceFile.getFileName().toString().endsWith(".jar")) {
       target = targetPath.resolve(sourceFile.getFileName().toString());
@@ -219,7 +220,7 @@ public final class PluginInstaller {
   }
 
   public static String rootEntryName(@NotNull Path zip) throws IOException {
-    try (var zipFile = new JBZipFile(Files.newByteChannel(zip, StandardOpenOption.READ), StandardCharsets.UTF_8, true, ThreeState.UNSURE)) {
+    try (var zipFile = new JBZipFile(zip)) {
       for (var zipEntry : zipFile.getEntries()) {
         // we do not necessarily get a separate entry for the subdirectory when the file
         // in the ZIP archive is placed in a subdirectory, so we need to check if the slash is found anywhere in the path
@@ -326,6 +327,13 @@ public final class PluginInstaller {
       var isRestartRequired = oldFile != null ||
                               !DynamicPlugins.allowLoadUnloadWithoutRestart(pluginDescriptor) ||
                               operation.isRestartRequired();
+      for (PendingDynamicPluginInstall dynamicPluginInstall : operation.getPendingDynamicPluginInstalls()) {
+        var installed = installAndLoadDynamicPlugin(dynamicPluginInstall.getFile(), parent, dynamicPluginInstall.getPluginDescriptor());
+        if (!installed) {
+          isRestartRequired = true;
+        }
+      }
+
       if (isRestartRequired) {
         installAfterRestart(pluginDescriptor, file, oldFile, false);
       }

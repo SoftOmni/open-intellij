@@ -1,9 +1,9 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xml.breadcrumbs;
 
 import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiAnchor;
@@ -30,13 +30,15 @@ final class PsiCrumb extends Crumb.Impl implements NavigatableCrumb, LazyTooltip
   @Override
   public String getTooltip() {
     if (needCalculateTooltip()) {
-      PsiElement element = getElement(this);
-      tooltip = element == null ? null
-                                : provider.getElementTooltip(element);
-      provider = null; // do not try recalculate tooltip
-      if (element != null) {
-        UIEventLogger.BreadcrumbShowTooltip.log(element.getProject(), element.getLanguage());
-      }
+      WriteIntentReadAction.run(() -> {
+        PsiElement element = getElement(this);
+        tooltip = element == null ? null
+                                  : provider.getElementTooltip(element);
+        provider = null; // do not try recalculate tooltip
+        if (element != null) {
+          UIEventLogger.BreadcrumbShowTooltip.log(element.getProject(), element.getLanguage());
+        }
+      });
     }
     return tooltip;
   }
@@ -68,18 +70,9 @@ final class PsiCrumb extends Crumb.Impl implements NavigatableCrumb, LazyTooltip
     PsiElement element = getElement(this);
     if (withSelection) {
       final TextRange range = getHighlightRange();
-      if (range != null) {
-        editor.getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
-      }
+      select(editor, range);
     }
     UIEventLogger.BreadcrumbNavigate.log(element != null ? element.getProject() : null, element != null ? element.getLanguage() : null, withSelection);
-  }
-
-  private static void moveEditorCaretTo(Editor editor, int offset) {
-    if (offset >= 0) {
-      editor.getCaretModel().moveToOffset(offset);
-      editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
-    }
   }
 
   @Contract("null -> null")

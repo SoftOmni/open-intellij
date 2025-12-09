@@ -11,7 +11,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.UnfairTextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.PsiElement;
 import it.unimi.dsi.fastutil.ints.*;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -50,15 +49,6 @@ final class FileStatus {
     for (int passId : getAllKnownPassIds(project)) {
       setDirtyScope(passId, WholeFileDirtyMarker.INSTANCE);
     }
-  }
-
-  /**
-   * Add dirty range appeared after some PSI element was modified.
-   * Can be different from the document change if the PSI implementation is extra weird for some language.
-   */
-  void addTouchedPsi(@NotNull PsiElement psiElement, @NotNull Document document) {
-    TextRange psiElementTextRange = psiElement.getTextRange();
-    combineScopesWith(psiElementTextRange, document);
   }
 
   boolean isErrorFound() {
@@ -150,11 +140,12 @@ final class FileStatus {
   public @NonNls String toString() {
     return
       (defensivelyMarked.isEmpty() ? "" : "defensivelyMarked = " + defensivelyMarked)
-      +(wolfPassFinished ? "" : "; wolfPassFinished = "+wolfPassFinished)
-      +(errorFound ? "; errorFound = "+errorFound : "")
+      +(wolfPassFinished ? "" : "; wolfPassFinished")
+      +(errorFound ? "; errorFound" : "")
       +(dirtyScopes.isEmpty() ? "" : "; dirtyScopes: (" +
+        (allDirtyScopesAreNull() ? "all null" :
                                      StringUtil.join(dirtyScopes.int2ObjectEntrySet(), e ->
-        " pass: "+e.getIntKey()+" -> "+(e.getValue() == WholeFileDirtyMarker.INSTANCE ? "Whole file" : e.getValue()), ";") + ")");
+        " pass: "+e.getIntKey()+" -> "+(e.getValue() == WholeFileDirtyMarker.INSTANCE ? "Whole file" : e.getValue()), ";")) + ")");
   }
 
   void setDirtyScope(int passId, @Nullable RangeMarker scope) {

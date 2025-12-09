@@ -72,8 +72,8 @@ object PluginAutoUpdater {
     val currentDescriptors = span("loading existing descriptors") {
       ZipFilePoolImpl().use { pool ->
         val discoveredPlugins = loadDescriptors(
-          CompletableDeferred(pool),
-          CompletableDeferred(PluginAutoUpdateRepository::class.java.classLoader),
+          zipPoolDeferred = CompletableDeferred(pool),
+          mainClassLoaderDeferred = CompletableDeferred(PluginAutoUpdateRepository::class.java.classLoader),
         ).second
         val loadingResult = PluginLoadingResult()
         loadingResult.initAndAddAll(descriptorLoadingResult = discoveredPlugins, initContext = ProductPluginInitContext())
@@ -134,7 +134,7 @@ object PluginAutoUpdater {
     // checks mostly duplicate what is written in com.intellij.ide.plugins.PluginInstaller.installFromDisk. FIXME, I guess
     val enabledPluginsAndModulesIds: Set<String> = currentDescriptors.getIdMap().flatMap { entry ->
       val desc = entry.value
-      listOf(desc.pluginId.idString) + desc.pluginAliases.map { it.idString } + desc.contentModules.map { it.moduleId.id } // FIXME content module aliases are not accounted
+      listOf(desc.pluginId.idString) + desc.pluginAliases.map { it.idString } + desc.contentModules.map { it.moduleId.name } // FIXME content module aliases are not accounted
     }.toSet()
     for ((id, updateDesc) in updates) {
       val existingDesc = currentDescriptors.getIdMap()[id] ?: currentDescriptors.getIncompleteIdMap()[id]

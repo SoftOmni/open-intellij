@@ -2,25 +2,30 @@
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.lookup.LookupElementWeigher;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * @see CompletionResultSet#withRelevanceSorter(CompletionSorter)
+ *
+ * @see #emptySorter
+ * @see #defaultSorter
  */
+@ApiStatus.NonExtendable
 public abstract class CompletionSorter {
   /**
    * @param beforeId id of the weigher which must be run after {@code weighers}
    * @param weighers weighers to add
    * @return a sorter combining the current one and added weighers
    */
-  public abstract @NotNull CompletionSorter weighBefore(@NotNull String beforeId, LookupElementWeigher... weighers);
+  public abstract @NotNull CompletionSorter weighBefore(@NotNull String beforeId, @NotNull LookupElementWeigher @NotNull ... weighers);
 
   /**
    * @param afterId  id of the weigher which must be run before {@code weighers}
    * @param weighers weighers to add.
    * @return a sorter combining the current one and added weighers
    */
-  public abstract @NotNull CompletionSorter weighAfter(@NotNull String afterId, LookupElementWeigher... weighers);
+  public abstract @NotNull CompletionSorter weighAfter(@NotNull String afterId, @NotNull LookupElementWeigher @NotNull ... weighers);
 
   /**
    * @param weigher a new weigher to append

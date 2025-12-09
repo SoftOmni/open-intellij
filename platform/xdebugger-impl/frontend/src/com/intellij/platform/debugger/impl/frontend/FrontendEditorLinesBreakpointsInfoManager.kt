@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.debugger.impl.frontend
 
+import com.intellij.ide.vfs.rpcId
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.Service
@@ -11,15 +12,16 @@ import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
-import com.intellij.openapi.editor.impl.editorId
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.platform.debugger.impl.frontend.FrontendViewportDataCache.ViewportInfo
 import com.intellij.platform.debugger.impl.rpc.XBreakpointTypeApi
+import com.intellij.platform.debugger.impl.shared.proxy.XBreakpointTypeProxy
 import com.intellij.platform.project.projectId
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.util.asDisposable
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.annotations.RequiresReadLock
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointTypeProxy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -131,11 +133,11 @@ private class EditorBreakpointLinesInfoMap(
     }
     cs.launch {
       mapUpdateRequest.collectLatest {
-        val (currentStamp, editorLinesCount) = readAction {
-          editor.document.modificationStamp to editor.document.lineCount
+        val (viewportInfo, currentStamp, editorLinesCount) = withContext(Dispatchers.EDT) {
+          val (firstViewportIndex, lastViewportIndex) = editor.viewportIndicesInclusive()
+          Triple(ViewportInfo(firstViewportIndex, lastViewportIndex), editor.document.modificationStamp, editor.document.lineCount)
         }
-        val (firstViewportIndex, lastViewportIndex) = editor.viewportIndicesInclusive()
-        breakpointsMap.update(ViewportInfo(firstViewportIndex, lastViewportIndex), editorLinesCount - 1, currentStamp)
+        breakpointsMap.update(viewportInfo, editorLinesCount - 1, currentStamp)
       }
     }
 
@@ -157,7 +159,7 @@ private class EditorBreakpointLinesInfoMap(
   suspend fun getBreakpointsInfoForLine(line: Int): EditorLineBreakpointsInfo {
     // let's try to find breakpoint types from the current map
     val currentEditorStamp = readAction { editor.document.modificationStamp }
-    return breakpointsMap.getDataWithCaching(line, currentEditorStamp) ?: EditorLineBreakpointsInfo(listOf(), false)
+    return breakpointsMap.getDataWithCaching(line, currentEditorStamp) ?: EditorLineBreakpointsInfo.EMPTY
   }
 
   fun getBreakpointsInfoForLineInternal(line: Int, currentEditorStamp: Long): EditorLineBreakpointsInfo? {
@@ -168,31 +170,30 @@ private class EditorBreakpointLinesInfoMap(
     cs.cancel()
   }
 
-  private suspend fun Editor.viewportIndicesInclusive(): Pair<Int, Int> {
-    return withContext(Dispatchers.EDT) {
-      if (isDisposed) {
-        cancel()
-      }
-      val visibleRange = calculateVisibleRange()
-      readAction {
-        val firstVisibleLine = document.getLineNumber(visibleRange.startOffset)
-        val lastVisibleLine = document.getLineNumber(visibleRange.endOffset)
-        firstVisibleLine to lastVisibleLine
-      }
+  @RequiresEdt
+  private fun Editor.viewportIndicesInclusive(): Pair<Int, Int> {
+    if (isDisposed) {
+      throw CancellationException()
     }
+    val visibleRange = calculateVisibleRange()
+    val firstVisibleLine = document.getLineNumber(visibleRange.startOffset)
+    val lastVisibleLine = document.getLineNumber(visibleRange.endOffset)
+    return firstVisibleLine to lastVisibleLine
   }
 }
 
 internal class EditorLineBreakpointsInfo(
   val types: List<XBreakpointTypeProxy>,
   val singleBreakpointVariant: Boolean,
-)
+) {
+  companion object {
+     val EMPTY = EditorLineBreakpointsInfo(listOf(), false)
+   }
+}
 
 internal suspend fun getAvailableBreakpointTypesFromServer(project: Project, editor: Editor, line: Int): EditorLineBreakpointsInfo {
-  val breakpointLinesInfo = XBreakpointTypeApi.getInstance().getBreakpointsInfoForLine(project.projectId(), editor.editorId(), line)
-  val breakpointTypesManager = FrontendXBreakpointTypesManager.getInstance(project)
-  val types = breakpointLinesInfo.availableTypes.mapNotNull { breakpointTypesManager.getTypeById(it) }
-  return EditorLineBreakpointsInfo(types, breakpointLinesInfo.singleBreakpointVariant)
+  return getAvailableBreakpointTypesFromServer(project, editor, line, line)?.singleOrNull()
+         ?: EditorLineBreakpointsInfo.EMPTY
 }
 
 private suspend fun getAvailableBreakpointTypesFromServer(project: Project, editor: Editor, start: Int, endInclusive: Int): List<EditorLineBreakpointsInfo>? {
@@ -200,7 +201,11 @@ private suspend fun getAvailableBreakpointTypesFromServer(project: Project, edit
   // TODO: is it possible to avoid this retry?
   val retriesCount = 5
   repeat(retriesCount) {
-    val breakpointsInfoDtos = XBreakpointTypeApi.getInstance().getBreakpointsInfoForEditor(project.projectId(), editor.editorId(), start, endInclusive)
+    val file = FileDocumentManager.getInstance().getFile(editor.document)
+               // no breakpoints in editors without a file
+               ?: return List(endInclusive - start + 1) { EditorLineBreakpointsInfo.EMPTY }
+    val fileId = file.rpcId()
+    val breakpointsInfoDtos = XBreakpointTypeApi.getInstance().getBreakpointsInfo(project.projectId(), fileId, start, endInclusive)
     val breakpointInfoList = breakpointsInfoDtos?.map { lineBreakpointInfo ->
       val types = lineBreakpointInfo.availableTypes.mapNotNull { breakpointTypesManager.getTypeById(it) }
       EditorLineBreakpointsInfo(types, lineBreakpointInfo.singleBreakpointVariant)

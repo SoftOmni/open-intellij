@@ -232,11 +232,6 @@ internal class FilteringBranchesTree(
       override fun onTreeChange() {
         updateTree()
       }
-
-      override fun onTreeDataChange() {
-        tree.revalidate()
-        tree.repaint()
-      }
     }
 
     tree.launchOnShow("Git Dashboard Tree") {
@@ -468,7 +463,7 @@ private class BranchesFilteringSpeedSearch(
   }
 }
 
-private class BranchesTreeMatcher(private val rawPattern: String?) : MinusculeMatcher() {
+private class BranchesTreeMatcher(rawPattern: String?) : MinusculeMatcher() {
   private val matchers: List<MinusculeMatcher> = if (rawPattern.isNullOrBlank()) {
     listOf(createMatcher(""))
   }
@@ -479,7 +474,7 @@ private class BranchesTreeMatcher(private val rawPattern: String?) : MinusculeMa
     }
   }
 
-  override fun getPattern(): String = rawPattern.orEmpty()
+  override val pattern: String = rawPattern.orEmpty()
 
   override fun matchingFragments(name: String): FList<TextRange>? {
     val candidates = matchers.mapNotNull { matcher ->

@@ -17,6 +17,7 @@ import com.intellij.java.syntax.parser.JavaKeywords;
 import com.intellij.lang.LangBundle;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.lang.jvm.types.JvmPrimitiveTypeKind;
+import com.intellij.modcompletion.ModCompletionItemProvider;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -453,15 +454,16 @@ public final class JavaCompletionContributor extends CompletionContributor imple
     PrefixMatcher matcher = result.getPrefixMatcher();
     PsiElement parent = position.getParent();
 
-    if (new JavaKeywordCompletion(parameters, session, smart).addWildcardExtendsSuper(result, position)) {
-      result.stopHere();
-      return;
-    }
 
     boolean mayCompleteReference = true;
 
     if (position instanceof PsiIdentifier) {
       addIdentifierVariants(parameters, position, result, session, matcher);
+      if (JavaMemberNameCompletionContributor.INSIDE_TYPE_PARAMS_PATTERN.accepts(position)) {
+        session.flushBatchItems();
+        result.stopHere();
+        return;
+      }
 
       Set<ExpectedTypeInfo> expectedInfos = ContainerUtil.newHashSet(JavaSmartCompletionContributor.getExpectedTypes(parameters));
       boolean shouldAddExpressionVariants = shouldAddExpressionVariants(parameters);
@@ -470,22 +472,24 @@ public final class JavaCompletionContributor extends CompletionContributor imple
         shouldAddExpressionVariants && addExpectedTypeMembers(parameters, false, expectedInfos,
                                                               item -> session.registerBatchItems(Collections.singleton(item)));
 
-      if (!smart) {
-        PsiAnnotation anno = findAnnotationWhoseAttributeIsCompleted(position);
-        if (anno != null) {
-          PsiClass annoClass = anno.resolveAnnotationType();
-          mayCompleteReference = mayCompleteValueExpression(position, annoClass);
-          if (annoClass != null) {
-            completeAnnotationAttributeName(result, position, anno, annoClass);
-            JavaKeywordCompletion.addPrimitiveTypes(result, position, session);
+      if (!ModCompletionItemProvider.modCommandCompletionEnabled()) {
+        if (!smart) {
+          PsiAnnotation anno = findAnnotationWhoseAttributeIsCompleted(position);
+          if (anno != null) {
+            PsiClass annoClass = anno.resolveAnnotationType();
+            mayCompleteReference = mayCompleteValueExpression(position, annoClass);
+            if (annoClass != null) {
+              completeAnnotationAttributeName(result, position, anno, annoClass);
+              JavaKeywordCompletion.addPrimitiveTypes(result, position, session);
+            }
           }
         }
-      }
 
-      PsiReference ref = position.getContainingFile().findReferenceAt(parameters.getOffset());
-      if (ref instanceof PsiLabelReference) {
-        session.registerBatchItems(processLabelReference((PsiLabelReference)ref));
-        result.stopHere();
+        PsiReference ref = position.getContainingFile().findReferenceAt(parameters.getOffset());
+        if (ref instanceof PsiLabelReference labelRef) {
+          session.registerBatchItems(processLabelReference(labelRef));
+          result.stopHere();
+        }
       }
 
       List<LookupElement> refSuggestions = Collections.emptyList();
@@ -645,7 +649,7 @@ public final class JavaCompletionContributor extends CompletionContributor imple
     return hadItems[0];
   }
 
-  private static @Nullable PsiAnnotation findAnnotationWhoseAttributeIsCompleted(@NotNull PsiElement position) {
+  public static @Nullable PsiAnnotation findAnnotationWhoseAttributeIsCompleted(@NotNull PsiElement position) {
     return ANNOTATION_ATTRIBUTE_NAME.accepts(position) && !JavaKeywordCompletion.isAfterPrimitiveOrArrayType(position)
            ? Objects.requireNonNull(PsiTreeUtil.getParentOfType(position, PsiAnnotation.class))
            : null;
@@ -733,9 +737,7 @@ public final class JavaCompletionContributor extends CompletionContributor imple
       items.add(LookupElementBuilder.create("*"));
     }
 
-    if (findAnnotationWhoseAttributeIsCompleted(position) == null) {
-      items.addAll(new JavaKeywordCompletion(parameters, session, smart).getResults());
-    }
+    items.addAll(new JavaKeywordCompletion(parameters, session, smart).getResults());
 
     addExpressionVariants(parameters, position, items::add);
 
@@ -839,10 +841,12 @@ public final class JavaCompletionContributor extends CompletionContributor imple
     PsiFile originalFile = parameters.getOriginalFile();
 
     boolean first = parameters.getInvocationCount() <= 1;
+    boolean instantiableOnly = JavaSmartCompletionContributor.AFTER_NEW.accepts(position);
     JavaCompletionProcessor.Options options =
       JavaCompletionProcessor.Options.DEFAULT_OPTIONS
         .withCheckAccess(first)
         .withFilterStaticAfterInstance(first)
+        .withInstantiableOnly(instantiableOnly)
         .withShowInstanceInStaticContext(!first && !smart);
 
     for (LookupElement element : JavaCompletionUtil.processJavaReference(position,
@@ -1017,7 +1021,7 @@ public final class JavaCompletionContributor extends CompletionContributor imple
 
   static boolean shouldInsertSemicolon(PsiElement position) {
     return position.getParent() instanceof PsiMethodReferenceExpression &&
-           JavaCompletionUtil.insertSemicolon(position.getParent().getParent());
+           JavaFrontendCompletionUtil.insertSemicolon(position.getParent().getParent());
   }
 
   private static @Unmodifiable List<LookupElement> processLabelReference(PsiLabelReference reference) {
@@ -1519,7 +1523,7 @@ public final class JavaCompletionContributor extends CompletionContributor imple
   private static @NotNull LookupElement markAsInaccessible(@NotNull LookupElement lookup) {
     return PrioritizedLookupElement.withExplicitProximity(LookupElementDecorator.withRenderer(lookup, new LookupElementRenderer<>() {
       @Override
-      public void renderElement(LookupElementDecorator<LookupElement> element, LookupElementPresentation presentation) {
+      public void renderElement(@NotNull LookupElementDecorator<LookupElement> element, @NotNull LookupElementPresentation presentation) {
         element.getDelegate().renderElement(presentation);
         presentation.setItemTextForeground(JBColor.RED);
       }

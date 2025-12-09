@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.updateSettings.impl;
 
 import com.intellij.ide.IdeBundle;
@@ -35,7 +35,6 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBDimension;
 import com.intellij.util.ui.JBUI;
 import kotlinx.coroutines.CoroutineScope;
-import nonapi.io.github.classgraph.utils.CollectionUtils;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -49,12 +48,8 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-/**
- * @author Alexander Lobas
- */
 @ApiStatus.Internal
 public class PluginUpdateDialog extends DialogWrapper {
-  private final boolean myPlatformUpdate;
   private final MyPluginModel myPluginModel;
   private final PluginsGroupComponent myPluginsPanel;
   private final PluginsGroup myGroup = new PluginsGroup("", PluginsGroupType.UPDATE);
@@ -63,82 +58,13 @@ public class PluginUpdateDialog extends DialogWrapper {
   private final ActionLink myIgnoreAction;
   private final JBCheckBox myAutoUpdateOption;
 
-  //Binary compatibility fields for AIA
-  private boolean myUpdateOnOk = false;
-  private Collection<PluginDownloader> myDownloaders;
-
   private @Nullable Runnable myFinishCallback;
 
   public PluginUpdateDialog(@Nullable Project project,
-                            @NotNull Collection<PluginUiModel> plugins,
+                            @NotNull Collection<PluginUiModel> updates,
                             @Nullable Collection<PluginUiModel> customRepositoryPlugins,
                             Map<PluginId, PluginUiModel> installedPlugins) {
-    this(project, plugins, customRepositoryPlugins, installedPlugins, false);
-    setTitle(IdeBundle.message("dialog.title.plugin.updates"));
-  }
-
-  //For compatibility purposes only
-  @Deprecated
-  public PluginUpdateDialog(@Nullable Project project,
-                            @NotNull Collection<PluginDownloader> updatesForPlugins,
-                            Map<PluginId, PluginUiModel> installedPlugins) {
-    this(project, ContainerUtil.map(updatesForPlugins, PluginDownloader::getUiModel), null, installedPlugins, true);
-    myUpdateOnOk = true;
-    myDownloaders = updatesForPlugins;
-    setTitle(IdeBundle.message("updates.dialog.title", ApplicationNamesInfo.getInstance().getFullProductName()));
-  }
-
-  //For compatibility purposes only
-  @Deprecated
-  public PluginUpdateDialog(@Nullable Project project,
-                            @NotNull Collection<PluginDownloader> updatesForPlugins) {
-    this(project, ContainerUtil.map(updatesForPlugins, PluginDownloader::getUiModel), null, findInstalledPlugins(updatesForPlugins), true);
-    myUpdateOnOk = true;
-    myDownloaders = updatesForPlugins;
-    setTitle(IdeBundle.message("updates.dialog.title", ApplicationNamesInfo.getInstance().getFullProductName()));
-  }
-
-  @Deprecated
-  public static boolean showDialogAndUpdate(@NotNull Collection<PluginDownloader> downloaders, PluginUpdateDialog dialog) {
-    if (dialog.showAndGet()) {
-      List<PluginUiModel> selectedPlugins = dialog.getSelectedPluginModels();
-      List<PluginDownloader> selectedDownloaders = findDownloadersForPlugins(downloaders, selectedPlugins);
-      runUpdateAll(selectedDownloaders, dialog.getContentPanel(), dialog.myFinishCallback, null);
-      return true;
-    }
-    return false;
-  }
-
-  private static Map<PluginId, PluginUiModel> findInstalledPlugins(Collection<PluginDownloader> downloaders) {
-    if (downloaders.isEmpty()) return Collections.emptyMap();
-    PluginDownloader downloader = ContainerUtil.getFirstItem(downloaders);
-    IdeaPluginDescriptorImpl descriptor = PluginManagerCore.getPluginSet().buildPluginIdMap().get(downloader.getId());
-    if (descriptor == null) return Collections.emptyMap();
-    return Map.of(descriptor.getPluginId(), new PluginUiModelAdapter(descriptor));
-  }
-
-  private static @NotNull List<PluginDownloader> findDownloadersForPlugins(@NotNull Collection<PluginDownloader> downloaders,
-                                                                           @NotNull List<PluginUiModel> selectedPlugins) {
-    List<PluginDownloader> selectedDownloaders = new ArrayList<>();
-    Set<PluginId> selectedPluginIds = ContainerUtil.map2Set(selectedPlugins, PluginUiModel::getPluginId);
-
-    for (PluginDownloader downloader : downloaders) {
-      if (selectedPluginIds.contains(downloader.getDescriptor().getPluginId())) {
-        selectedDownloaders.add(downloader);
-      }
-    }
-
-    return selectedDownloaders;
-  }
-
-  private PluginUpdateDialog(@Nullable Project project,
-                             Collection<PluginUiModel> updates,
-                             @Nullable Collection<PluginUiModel> customRepositoryPlugins,
-                             Map<PluginId, PluginUiModel> installedPlugins,
-                             boolean platformUpdate) {
     super(project, true);
-
-    myPlatformUpdate = platformUpdate;
 
     myIgnoreAction = new ActionLink(IdeBundle.message("updates.ignore.updates.button", updates.size()), e -> {
       doIgnoreUpdateAction(e);
@@ -154,8 +80,8 @@ public class PluginUpdateDialog extends DialogWrapper {
       }
 
       @Override
-      protected @NotNull Collection<PluginUiModel> getCustomRepoPlugins() {
-        return customRepositoryPlugins != null ? customRepositoryPlugins : super.getCustomRepoPlugins();
+      protected @Nullable Collection<PluginUiModel> getCustomRepoPlugins() {
+        return customRepositoryPlugins;
       }
     };
 
@@ -217,6 +143,36 @@ public class PluginUpdateDialog extends DialogWrapper {
     if (rootPane != null) {
       rootPane.setPreferredSize(new JBDimension(800, 600));
     }
+    setTitle(IdeBundle.message("dialog.title.plugin.updates"));
+  }
+
+  public static boolean showDialogAndUpdate(@NotNull Collection<PluginDownloader> downloaders, @NotNull PluginUpdateDialog dialog) {
+    if (dialog.showAndGet()) {
+      List<PluginUiModel> selectedPlugins = dialog.getSelectedPluginModels();
+      List<PluginDownloader> selectedDownloaders = findDownloadersForPlugins(downloaders, selectedPlugins);
+      runUpdateAll(selectedDownloaders, dialog.getContentPanel(), dialog.myFinishCallback, null);
+      return true;
+    }
+    return false;
+  }
+
+  public static List<PluginDownloader> getSelectedDownloaders(@NotNull Collection<PluginDownloader> downloaders,
+                                                              @NotNull PluginUpdateDialog dialog) {
+    return findDownloadersForPlugins(downloaders, dialog.getSelectedPluginModels());
+  }
+
+  private static @NotNull List<PluginDownloader> findDownloadersForPlugins(@NotNull Collection<PluginDownloader> downloaders,
+                                                                           @NotNull List<PluginUiModel> selectedPlugins) {
+    List<PluginDownloader> selectedDownloaders = new ArrayList<>();
+    Set<PluginId> selectedPluginIds = ContainerUtil.map2Set(selectedPlugins, PluginUiModel::getPluginId);
+
+    for (PluginDownloader downloader : downloaders) {
+      if (selectedPluginIds.contains(downloader.getDescriptor().getPluginId())) {
+        selectedDownloaders.add(downloader);
+      }
+    }
+
+    return selectedDownloaders;
   }
 
   protected void doIgnoreUpdateAction(ActionEvent e) {
@@ -272,23 +228,9 @@ public class PluginUpdateDialog extends DialogWrapper {
       UpdateOptions state = UpdateSettings.getInstance().getState();
       boolean selected = myAutoUpdateOption.isSelected();
       if (state.isPluginsAutoUpdateEnabled() != selected) {
-        state.setPluginsAutoUpdateEnabled(selected);
-        ApplicationManager.getApplication().getService(PluginAutoUpdateService.class).onSettingsChanged();
+        UiPluginManager.getInstance().setPluginsAutoUpdateEnabled(selected);
       }
     }
-
-    if (myPlatformUpdate || !myUpdateOnOk) return;
-
-    List<PluginDownloader> toDownloads = new ArrayList<>();
-
-    for (PluginDownloader downloader : myDownloaders) {
-      ListPluginComponent component = Objects.requireNonNull(myGroup.ui.findComponent(downloader.getDescriptor()));
-      if (component.getChooseUpdateButton().isSelected()) {
-        toDownloads.add(downloader);
-      }
-    }
-
-    runUpdateAll(toDownloads, getContentPanel(), myFinishCallback, null);
   }
 
   public static void runUpdateAll(@NotNull Collection<PluginDownloader> toDownload,
@@ -321,9 +263,7 @@ public class PluginUpdateDialog extends DialogWrapper {
                 .addAction(new NotificationAction(IdeBundle.message("updates.auto.update.title")) {
                   @Override
                   public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
-                    UpdateSettings.getInstance().getState().setPluginsAutoUpdateEnabled(true);
-                    ApplicationManager.getApplication().getService(PluginAutoUpdateService.class)
-                      .onSettingsChanged();
+                    UiPluginManager.getInstance().setPluginsAutoUpdateEnabled(true);
                     notification.expire();
                   }
                 })

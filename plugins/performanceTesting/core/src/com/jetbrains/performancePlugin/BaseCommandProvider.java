@@ -30,6 +30,7 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(OpenFileWithTerminateCommand.PREFIX, OpenFileWithTerminateCommand::new),
       Map.entry(WaitForSmartCommand.PREFIX, WaitForSmartCommand::new),
       Map.entry(WaitForInitialRefreshCommand.PREFIX, WaitForInitialRefreshCommand::new),
+      Map.entry(RefreshFilesInVfsCommand.PREFIX, RefreshFilesInVfsCommand::new),
       Map.entry(SingleInspectionCommand.PREFIX, SingleInspectionCommand::new),
       Map.entry(StartPowerSave.PREFIX, StartPowerSave::new),
       Map.entry(StopPowerSave.PREFIX, StopPowerSave::new),
@@ -37,6 +38,8 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(CleanCaches.PREFIX, CleanCaches::new),
       Map.entry(FindUsagesCommand.PREFIX, FindUsagesCommand::new),
       Map.entry(FindUsagesInBackgroundCommand.PREFIX, FindUsagesInBackgroundCommand::new),
+      Map.entry(FindUsagesInToolWindowCommand.PREFIX, FindUsagesInToolWindowCommand::new),
+      Map.entry(FindUsagesInToolWindowWaitCommand.PREFIX, FindUsagesInToolWindowWaitCommand::new),
       Map.entry(IdeEditorKeyCommand.PREFIX, IdeEditorKeyCommand::new),
       Map.entry(ShowAltEnter.PREFIX, ShowAltEnter::new),
       Map.entry(SelectCommand.PREFIX, SelectCommand::new),
@@ -79,6 +82,7 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(FinishInlineRename.PREFIX, FinishInlineRename::new),
       Map.entry(AssertOpenedFileInSpecificRoot.PREFIX, AssertOpenedFileInSpecificRoot::new),
       Map.entry(CloseAllTabsCommand.PREFIX, CloseAllTabsCommand::new),
+      Map.entry(HideAllToolWindowsCommand.PREFIX, HideAllToolWindowsCommand::new),
       Map.entry(CollectAllFilesCommand.PREFIX, CollectAllFilesCommand::new),
       Map.entry(ExecuteEditorActionCommand.PREFIX, ExecuteEditorActionCommand::new),
       Map.entry(AssertCompletionCommand.PREFIX, AssertCompletionCommand::new),
@@ -135,7 +139,8 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(OpenProblemViewPanelCommand.PREFIX, OpenProblemViewPanelCommand::new),
       Map.entry(AssertProblemsViewCountCommand.PREFIX, AssertProblemsViewCountCommand::new),
       Map.entry(DetectProjectLeaksCommand.PREFIX, DetectProjectLeaksCommand::new),
-      Map.entry(WaitForReOpenedFileCommand.PREFIX, WaitForReOpenedFileCommand::new)
+      Map.entry(WaitForReOpenedFileCommand.PREFIX, WaitForReOpenedFileCommand::new),
+      Map.entry(WaitForCodeVisionCommand.PREFIX, WaitForCodeVisionCommand::new)
     );
   }
 }

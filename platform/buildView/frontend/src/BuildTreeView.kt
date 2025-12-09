@@ -36,7 +36,6 @@ import com.intellij.ui.tree.ui.DefaultTreeUI
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.EditSourceOnDoubleClickHandler
 import com.intellij.util.EditSourceOnEnterKeyHandler
-import com.intellij.util.asDisposable
 import com.intellij.util.disposeOnCompletion
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -97,11 +96,6 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
       val nodeMap = mutableMapOf(buildProgressRootNode.id to buildProgressRootNode)
       model.getTreeEventsFlow().collect { event ->
         handleTreeEvent(event, nodeMap)
-      }
-    }
-    uiScope.launch {
-      model.getFilteringStateFlow().collect {
-        handleFilteringStateChange(it)
       }
     }
     uiScope.launch(Dispatchers.EDT /* Navigatable-s might expect WIL to be taken */) {
@@ -179,11 +173,13 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
       is BuildNodesUpdate -> {
         timeDiff = event.currentTimestamp - System.currentTimeMillis()
         val nodeInfos = event.nodes
+        var needsNavigationContextUpdate = false
         if (nodeInfos.isEmpty()) {
           LOG.debug("Clearing nodes")
           durationUpdater.reset()
           nodeMap.clear()
           rootNode.removeChildren()
+          needsNavigationContextUpdate = true
         }
         else {
           nodeInfos.forEach { nodeInfo ->
@@ -201,16 +197,23 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
               nodeMap[nodeInfo.id] = newNode
               if (parentNode.addChild(newNode)) {
                 maybeExpand(TreePathUtil.toTreePath(parentNode))
+                needsNavigationContextUpdate = needsNavigationContextUpdate ||
+                                               parentNode.childCount == 1 || // adding first child might change parent's navigatable status
+                                               newNode.occurrenceNavigatable != null
               }
             }
             else {
               LOG.debug { "Updating node (id=${nodeInfo.id})" }
+              val wasNavigatable = node.isNavigatable
               durationUpdater.onNodeUpdated(node.content, nodeInfo)
               node.content = nodeInfo
+              needsNavigationContextUpdate = needsNavigationContextUpdate || node.childCount != 0 || node.isNavigatable != wasNavigatable
             }
           }
         }
-        updateNavigationContext()
+        if (needsNavigationContextUpdate) {
+          updateNavigationContext()
+        }
       }
       is BuildTreeExposeRequest -> {
         val nodeId = event.nodeId
@@ -235,6 +238,9 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
           }
         }
       }
+      is BuildTreeFilteringState -> {
+        handleFilteringStateChange(event)
+      }
     }
   }
 
@@ -244,8 +250,12 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
     }
     else {
       LOG.debug { "Filtering state update: $filteringState" }
+      val treeWasEmpty = buildProgressRootNode.childCount == 0
       this.filteringState = filteringState
       rootNode.reload()
+      if (treeWasEmpty) {
+        tree.expandRow(0)
+      }
       updateNavigationContext()
     }
   }
@@ -347,10 +357,14 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
       }
 
     private var cachedVisibleChildren: MutableList<MyNode>? = null
+    private var cachedIndex = -1
     private var cachedFilteringState: BuildTreeFilteringState? = null
 
     val occurrenceNavigatable: NavigatableId?
       get() = if (content.hasProblems && childCount == 0) content.navigatables.firstOrNull() else null
+
+    val isNavigatable: Boolean
+      get() = isVisible() && occurrenceNavigatable != null
 
     fun addChild(node: MyNode): Boolean {
       assert(node.parent == null)
@@ -362,7 +376,9 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
       clearCacheIfInvalid()
       if (node.isVisible()) {
         cachedVisibleChildren?.add(node)
-        treeModel.nodesWereInserted(this, intArrayOf(childCount - 1))
+        val newIndex = childCount - 1
+        node.cachedIndex = newIndex
+        treeModel.nodesWereInserted(this, intArrayOf(newIndex))
         return true
       }
       return false
@@ -391,7 +407,7 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
         }
       }
       else if (wasVisible) {
-        parent.cachedVisibleChildren?.removeAt(nodeIndex)
+        parent.clearCache()
         treeModel.nodesWereRemoved(parent, intArrayOf(nodeIndex), arrayOf(this))
       }
       else {
@@ -413,6 +429,7 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
 
     private fun clearCache() {
       cachedVisibleChildren = null
+      cachedFilteringState = null
     }
 
     private fun clearCacheIfInvalid() {
@@ -430,17 +447,26 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
     }
 
     fun getVisibleChildren(): List<MyNode> {
-      val allChildren = children ?: return emptyList()
+      if (children == null) return emptyList()
       val cached = cachedVisibleChildren
-      val currentFilteringState = filteringState
-      if (cached != null && cachedFilteringState == currentFilteringState) {
+      if (cached != null && cachedFilteringState == filteringState) {
         return cached
       }
-      cachedFilteringState = currentFilteringState
+      return rebuildCache()
+    }
+
+    private fun rebuildCache(): List<MyNode> {
+      cachedFilteringState = filteringState
       val result = mutableListOf<MyNode>()
-      allChildren.forEach {
-        if ((it as MyNode).isVisible()) {
+      var index = 0
+      children.forEach {
+        val child = it as MyNode
+        if (child.isVisible()) {
           result.add(it)
+          child.cachedIndex = index++
+        }
+        else {
+          child.cachedIndex = -1
         }
       }
       cachedVisibleChildren = result
@@ -460,7 +486,11 @@ internal class BuildTreeView(private val project: Project, parentScope: Coroutin
     }
 
     override fun getIndex(node: TreeNode): Int {
-      return if ((node as? MyNode)?.isVisible() == true) getVisibleChildren().indexOf(node) else -1
+      if (node !is MyNode || children == null || node.parent !== this) return -1
+      if (cachedFilteringState != filteringState) {
+        rebuildCache()
+      }
+      return node.cachedIndex
     }
 
     override fun children(): Enumeration<TreeNode> {

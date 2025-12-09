@@ -45,7 +45,8 @@ jvm_library(
     "//platform/util/jdom",
     "//platform/platform-impl:ide-impl",
     "//plugins/coverage-common/intellij.platform.coverage.agent:coverage-agent",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
+    "//platform/execution",
   ],
   exports = [
     "//plugins/coverage-common:coverage",
@@ -87,6 +88,7 @@ jvm_library(
     "//java/java-psi-impl:psi-impl",
     "//platform/lang-impl",
     "//java/java-impl:impl",
+    "//java/java-impl:impl_test_lib",
     "//platform/platform-impl/concurrency",
     "//platform/testFramework",
     "//platform/testFramework:testFramework_test_lib",
@@ -99,8 +101,9 @@ jvm_library(
     "//platform/util/jdom",
     "//platform/platform-impl:ide-impl",
     "//plugins/coverage-common/intellij.platform.coverage.agent:coverage-agent",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//java/java-runtime:rt",
+    "//platform/execution",
   ],
   exports = [
     "//plugins/coverage-common:coverage",

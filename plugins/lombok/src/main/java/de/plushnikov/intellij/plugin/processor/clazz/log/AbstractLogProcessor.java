@@ -8,6 +8,7 @@ import de.plushnikov.intellij.plugin.lombokconfig.ConfigKey;
 import de.plushnikov.intellij.plugin.problem.ProblemSink;
 import de.plushnikov.intellij.plugin.processor.clazz.AbstractClassProcessor;
 import de.plushnikov.intellij.plugin.psi.LombokLightFieldBuilder;
+import de.plushnikov.intellij.plugin.util.LombokProcessorUtil;
 import de.plushnikov.intellij.plugin.util.PsiAnnotationUtil;
 import de.plushnikov.intellij.plugin.util.PsiClassUtil;
 import org.jetbrains.annotations.ApiStatus;
@@ -88,18 +89,37 @@ public abstract class AbstractLogProcessor extends AbstractClassProcessor {
         builder.addErrorMessage("inspection.message.not.generating.field.s.field.with.same.name.already.exists", loggerName);
         result = false;
       }
+
+      final boolean loggerStatic = isLoggerStatic(psiClass);
+      if (psiClass.isRecord() && !loggerStatic) {
+        builder.addErrorMessage("inspection.message.logger.fields.must.be.static.in.records");
+        result = false;
+      }
+
+      if (loggerStatic &&
+          !(psiClass.hasModifierProperty(PsiModifier.STATIC) || psiClass.getContainingClass() == null || psiClass.isRecord())
+      ) {
+        builder.addErrorMessage("inspection.message.logger.can.be.used.on.static.inner.classes.only", StringUtil.getShortName(getSupportedAnnotationClasses()[0]));
+        result = false;
+      }
     }
     return result;
   }
+
+
 
   @Override
   protected void generatePsiElements(@NotNull PsiClass psiClass,
                                      @NotNull PsiAnnotation psiAnnotation,
                                      @NotNull List<? super PsiElement> target, @Nullable String nameHint) {
-    target.add(createLoggerField(psiClass, psiAnnotation));
+    final String loggerVisibility = LombokProcessorUtil.getAccessVisibilityPrivateDefault(psiAnnotation);
+    if (loggerVisibility != null) {
+      target.add(createLoggerField(psiClass, psiAnnotation, loggerVisibility));
+    }
   }
 
-  private LombokLightFieldBuilder createLoggerField(@NotNull PsiClass psiClass, @NotNull PsiAnnotation psiAnnotation) {
+  private LombokLightFieldBuilder createLoggerField(@NotNull PsiClass psiClass, @NotNull PsiAnnotation psiAnnotation,
+                                                    @NotNull @PsiModifier.ModifierConstant String loggerVisibility) {
     // called only after validation succeeded
     final Project project = psiClass.getProject();
     final PsiManager manager = psiClass.getContainingFile().getManager();
@@ -114,7 +134,7 @@ public abstract class AbstractLogProcessor extends AbstractClassProcessor {
     LombokLightFieldBuilder loggerField = new LombokLightFieldBuilder(manager, getLoggerName(psiClass), psiLoggerType)
       .withContainingClass(psiClass)
       .withModifier(PsiModifier.FINAL)
-      .withModifier(PsiModifier.PRIVATE)
+      .withModifier(loggerVisibility)
       .withNavigationElement(psiAnnotation);
     if (isLoggerStatic(psiClass)) {
       loggerField.withModifier(PsiModifier.STATIC);

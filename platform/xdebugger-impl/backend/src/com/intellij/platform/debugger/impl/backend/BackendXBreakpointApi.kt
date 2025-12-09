@@ -9,16 +9,13 @@ import com.intellij.openapi.vfs.findDocument
 import com.intellij.platform.debugger.impl.rpc.*
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.project.findProject
-import com.intellij.platform.rpc.backend.impl.DocumentSync
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.breakpoints.SuspendPolicy
 import com.intellij.xdebugger.evaluation.EvaluationMode
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerImpl
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointProxy.Monolith.Companion.getEditorsProvider
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointUtil
 import com.intellij.xdebugger.impl.breakpoints.XLineBreakpointImpl
-import com.intellij.xdebugger.impl.rpc.XBreakpointId
-import com.intellij.xdebugger.impl.rpc.XBreakpointTypeId
+import com.intellij.xdebugger.impl.proxy.getEditorsProvider
 import com.intellij.xdebugger.impl.rpc.models.findValue
 
 internal class BackendXBreakpointApi : XBreakpointApi {
@@ -78,8 +75,7 @@ internal class BackendXBreakpointApi : XBreakpointApi {
 
   override suspend fun setLine(breakpointId: XBreakpointId, requestId: Long, line: Int, documentPatchVersion: DocumentPatchVersion?): Boolean {
     val breakpoint = breakpointId.findValue() as? XLineBreakpointImpl<*> ?: return true
-    DocumentSync.awaitDocumentSync()
-    if (!breakpoint.documentVersionMatches(documentPatchVersion)) return false
+    if (!breakpoint.awaitDocumentIsInSyncAndCommitted(documentPatchVersion)) return false
     edtWriteAction {
       breakpoint.setLine(requestId, line)
     }
@@ -88,8 +84,7 @@ internal class BackendXBreakpointApi : XBreakpointApi {
 
   override suspend fun updatePosition(breakpointId: XBreakpointId, requestId: Long, documentPatchVersion: DocumentPatchVersion?): Boolean {
     val breakpoint = breakpointId.findValue() as? XLineBreakpointImpl<*> ?: return true
-    DocumentSync.awaitDocumentSync()
-    if (!breakpoint.documentVersionMatches(documentPatchVersion)) return false
+    if (!breakpoint.awaitDocumentIsInSyncAndCommitted(documentPatchVersion)) return false
     edtWriteAction {
       breakpoint.resetSourcePosition(requestId)
     }
@@ -154,7 +149,7 @@ internal class BackendXBreakpointApi : XBreakpointApi {
   }
 }
 
-private suspend fun XLineBreakpointImpl<*>.documentVersionMatches(version: DocumentPatchVersion?): Boolean {
+private suspend fun XLineBreakpointImpl<*>.awaitDocumentIsInSyncAndCommitted(version: DocumentPatchVersion?): Boolean {
   val document = readAction { file?.findDocument() } ?: return true
-  return document.documentVersionMatches(project, version)
+  return document.awaitIsInSyncAndCommitted(project, version)
 }

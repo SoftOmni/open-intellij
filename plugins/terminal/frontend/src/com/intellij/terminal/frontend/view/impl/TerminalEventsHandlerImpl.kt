@@ -9,16 +9,24 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.openapi.util.TextRange
 import com.intellij.terminal.JBTerminalSystemSettingsProviderBase
 import com.jediterm.terminal.emulator.mouse.MouseButtonCodes
 import com.jediterm.terminal.emulator.mouse.MouseButtonModifierFlags
 import com.jediterm.terminal.emulator.mouse.MouseFormat
 import com.jediterm.terminal.emulator.mouse.MouseMode
+import kotlinx.coroutines.Deferred
 import org.jetbrains.plugins.terminal.TerminalOptionsProvider
-import org.jetbrains.plugins.terminal.block.reworked.*
+import org.jetbrains.plugins.terminal.block.reworked.TerminalCommandCompletion
+import org.jetbrains.plugins.terminal.block.reworked.TerminalSessionModel
+import org.jetbrains.plugins.terminal.block.reworked.TerminalUsageLocalStorage
 import org.jetbrains.plugins.terminal.block.util.TerminalDataContextUtils.isOutputModelEditor
-import org.jetbrains.plugins.terminal.session.TerminalState
+import org.jetbrains.plugins.terminal.session.TerminalStartupOptions
+import org.jetbrains.plugins.terminal.session.guessShellName
+import org.jetbrains.plugins.terminal.session.impl.TerminalState
+import org.jetbrains.plugins.terminal.util.getNow
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalOutputStatus
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalShellIntegration
 import java.awt.Point
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
@@ -41,6 +49,8 @@ internal open class TerminalEventsHandlerImpl(
   private val settings: JBTerminalSystemSettingsProviderBase,
   private val scrollingModel: TerminalOutputScrollingModel?,
   private val outputModel: TerminalOutputModel,
+  private val shellIntegrationDeferred: Deferred<TerminalShellIntegration>?,
+  private val startupOptionsDeferred: Deferred<TerminalStartupOptions>?,
   private val typeAhead: TerminalTypeAhead?,
 ) : TerminalEventsHandler {
   private var ignoreNextKeyTypedEvent: Boolean = false
@@ -165,7 +175,7 @@ internal open class TerminalEventsHandlerImpl(
     val typedString = keyChar.toString()
     if (e.original.id == KeyEvent.KEY_TYPED) {
       val inlineCompletionTypingSession = InlineCompletion.getHandlerOrNull(editor)?.typingSessionTracker
-      editor.caretModel.moveToOffset(outputModel.cursorOffsetState.value.toRelative())
+      editor.caretModel.moveToOffset(outputModel.cursorOffset.toRelative(outputModel))
       inlineCompletionTypingSession?.startTypingSession(editor)
 
       typeAhead?.type(typedString)
@@ -285,18 +295,21 @@ internal open class TerminalEventsHandlerImpl(
       // mousePressed() handles mouse wheel using SCROLLDOWN and SCROLLUP buttons
       mousePressed(x, y, event)
     }
-    else if (terminalState.isAlternateScreenBuffer && settings.sendArrowKeysInAlternativeMode()) {
-      //Send Arrow keys instead
-      val arrowKeys = if (event.wheelRotation < 0) {
-        encodingManager.getCode(KeyEvent.VK_UP, 0)
+    else if (terminalState.isAlternateScreenBuffer &&
+             settings.simulateMouseScrollWithArrowKeysInAlternativeScreen() &&
+             !event.isShiftDown /* skip horizontal scrolls */) {
+      // Send Arrow keys instead
+      val arrowKeys: ByteArray? = when {
+        event.wheelRotation < 0 -> encodingManager.getCode(KeyEvent.VK_UP, 0)
+        event.wheelRotation > 0 -> encodingManager.getCode(KeyEvent.VK_DOWN, 0)
+        else -> null
       }
-      else {
-        encodingManager.getCode(KeyEvent.VK_DOWN, 0)
+      if (arrowKeys != null) {
+        repeat(abs(event.unitsToScroll)) {
+          terminalInput.sendBytes(arrowKeys)
+        }
+        event.consume()
       }
-      for (i in 0 until abs(event.unitsToScroll)) {
-        terminalInput.sendBytes(arrowKeys!!)
-      }
-      event.consume()
     }
   }
 
@@ -314,11 +327,19 @@ internal open class TerminalEventsHandlerImpl(
     return when {
       SwingUtilities.isLeftMouseButton(event) -> MouseButtonCodes.LEFT
       SwingUtilities.isMiddleMouseButton(event) -> MouseButtonCodes.MIDDLE
-      SwingUtilities.isRightMouseButton(
-        event) -> MouseButtonCodes.NONE  //we don't handle right mouse button as it used for the context menu invocation
-      event is MouseWheelEvent -> if (event.wheelRotation > 0) MouseButtonCodes.SCROLLUP else MouseButtonCodes.SCROLLDOWN
+      SwingUtilities.isRightMouseButton(event) -> {
+        // we don't handle the right mouse button as it used for the context menu invocation
+        MouseButtonCodes.NONE
+      }  
+      event is MouseWheelEvent -> wheelRotationToButtonCode(event.wheelRotation)
       else -> return MouseButtonCodes.NONE
     }
+  }
+
+  private fun wheelRotationToButtonCode(wheelRotation: Int): Int = when {
+    wheelRotation > 0 -> MouseButtonCodes.SCROLLUP
+    wheelRotation < 0 -> MouseButtonCodes.SCROLLDOWN
+    else -> MouseButtonCodes.NONE
   }
 
   private fun applyModifierKeys(event: MouseEvent, cb: Int): Int {
@@ -375,7 +396,7 @@ internal open class TerminalEventsHandlerImpl(
    * Essential for correct lookup behavior.
    */
   private fun syncEditorCaretWithModel() {
-    val expectedCaretOffset = outputModel.cursorOffsetState.value.toRelative()
+    val expectedCaretOffset = outputModel.cursorOffset.toRelative(outputModel)
     val moveCaretAction = { editor.caretModel.moveToOffset(expectedCaretOffset) }
     if (editor.caretModel.offset != expectedCaretOffset) {
       val lookup = LookupManager.getActiveLookup(editor)
@@ -390,11 +411,13 @@ internal open class TerminalEventsHandlerImpl(
 
   private fun scheduleCompletionPopupIfNeeded(charTyped: Char) {
     val project = editor.project ?: return
-    val blocksModel = editor.getUserData(TerminalBlocksModel.KEY) ?: return
+    val shellName = startupOptionsDeferred?.getNow()?.guessShellName() ?: return
+    val shellIntegration = shellIntegrationDeferred?.getNow() ?: return
     if (editor.isOutputModelEditor
-        && TerminalCommandCompletion.isEnabled()
+        && TerminalCommandCompletion.isEnabled(project)
+        && TerminalCommandCompletion.isSupportedForShell(shellName)
         && TerminalOptionsProvider.instance.showCompletionPopupAutomatically
-        && blocksModel.isCommandTypingMode()
+        && shellIntegration.outputStatus.value == TerminalOutputStatus.TypingCommand
         && canTriggerCompletion(charTyped)
         && LookupManager.getActiveLookup(editor) == null
         && outputModel.getTextAfterCursor().isBlank()
@@ -404,13 +427,10 @@ internal open class TerminalEventsHandlerImpl(
   }
 
   private fun canTriggerCompletion(char: Char): Boolean {
-    return Character.isLetterOrDigit(char) || char == '-'
+    return Character.isLetterOrDigit(char)
   }
 
-  private fun TerminalOutputModel.getTextAfterCursor(): @NlsSafe String {
-    val cursorOffset = cursorOffsetState.value.toRelative()
-    return document.getText(TextRange(cursorOffset, document.textLength))
-  }
+  private fun TerminalOutputModel.getTextAfterCursor(): @NlsSafe CharSequence = getText(cursorOffset, endOffset)
 
   companion object {
     private val LOG = Logger.getInstance(TerminalEventsHandlerImpl::class.java)

@@ -22,11 +22,14 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.io.NioFiles;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.LicensingFacade;
+import com.intellij.util.Restarter;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.system.OS;
 import com.intellij.util.ui.JBUI;
+import kotlin.Unit;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -36,9 +39,9 @@ import java.awt.event.ActionEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.intellij.openapi.updateSettings.impl.UpdateCheckerService.SELF_UPDATE_STARTED_FOR_BUILD_PROPERTY;
+import static java.util.Objects.requireNonNull;
 
 @ApiStatus.Internal
 public final class PlatformUpdateDialog extends AbstractUpdateDialog {
@@ -49,8 +52,7 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
   private final @Nullable LicenseInfo myLicenseInfo;
   private final @Nullable Path myTestPatch;
 
-  private record LicenseInfo(@NlsContexts.Label String licenseNote, boolean warning) {
-  }
+  private record LicenseInfo(@NlsContexts.Label String licenseNote, boolean warning) { }
 
   public PlatformUpdateDialog(
     @Nullable Project project,
@@ -125,16 +127,17 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
 
   @Override
   protected @NotNull JComponent createCenterPanel() {
-    return UpdateInfoPanel.create(
-      myPlatformUpdate.getNewBuild(),
-      myPlatformUpdate.getPatches(),
-      myTestPatch,
-      myWriteProtected,
-      myLicenseInfo != null ? myLicenseInfo.licenseNote : null,
-      myLicenseInfo != null && myLicenseInfo.warning,
-      myAddConfigureUpdatesLink,
-      myPlatformUpdate.getUpdatedChannel()
-    );
+    UpdateInfoPanel infoPanel =
+      new UpdateInfoPanel(myPlatformUpdate.getNewBuild(),
+                          myPlatformUpdate.getPatches(),
+                          myTestPatch,
+                          myWriteProtected,
+                          myLicenseInfo != null ? myLicenseInfo.licenseNote : null,
+                          myLicenseInfo != null && myLicenseInfo.warning,
+                          myAddConfigureUpdatesLink,
+                          myPlatformUpdate.getUpdatedChannel(),
+                          this.myDisposable);
+    return Registry.is("ide.update.dialog.new.ui.enabled") ? infoPanel.createNew() : infoPanel.create();
   }
 
   @Override
@@ -168,20 +171,19 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
     var actions = new ArrayList<Action>();
     actions.add(getCancelAction());
 
-    AbstractAction updateButton = null;
+    var updateButton = (AbstractAction)null;
     if (myPlatformUpdate.getPatches() != null || myTestPatch != null) {
       var canRestart = ApplicationManager.getApplication().isRestartCapable();
       var name = IdeBundle.message(canRestart ? "updates.download.and.restart.button" : "updates.apply.manually.button");
       updateButton = new AbstractAction(name) {
         @Override
-        @SuppressWarnings({"unchecked", "DataFlowIssue"})
         public void actionPerformed(ActionEvent e) {
           close(OK_EXIT_CODE);
-          PluginModelAsyncOperationsExecutor.INSTANCE
-            .findPlugins(myUpdatesForPlugins.stream().map(it -> it.getId()).collect(Collectors.toSet()), plugins -> {
-              downloadPatchAndRestart((Map<PluginId, PluginUiModel>)plugins);
-              return null;
-            });
+          var downloaders = myUpdatesForPlugins != null ? myUpdatesForPlugins : Set.<PluginDownloader>of();
+          PluginModelAsyncOperationsExecutor.INSTANCE.findPlugins(downloaders, plugins -> {
+            downloadPatchAndRestart(plugins);
+            return Unit.INSTANCE;
+          });
         }
       };
       updateButton.setEnabled(!myWriteProtected);
@@ -213,11 +215,13 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
   }
 
   private void downloadPatchAndRestart(Map<PluginId, PluginUiModel> installedPlugins) {
-    List<PluginUiModel> updates =
-      myUpdatesForPlugins != null ? ContainerUtil.map(myUpdatesForPlugins, it -> it.getUiModel()) : Collections.emptyList();
-    PluginUpdateDialog dialog = new PluginUpdateDialog(myProject, updates, null, installedPlugins);
-    if (!ContainerUtil.isEmpty(myUpdatesForPlugins) && !PluginUpdateDialog.showDialogAndUpdate(myUpdatesForPlugins, dialog)) {
-      return;  // update cancelled
+    Collection<PluginDownloader> selectedPluginsToUpdate = new ArrayList<>();
+    if (myUpdatesForPlugins != null && !installedPlugins.isEmpty()) {
+      var dialog = new PluginUpdateDialog(myProject, ContainerUtil.map(myUpdatesForPlugins, it -> it.getUiModel()), null, installedPlugins);
+      if (!dialog.showAndGet()) {
+        return;  // update cancelled
+      }
+      selectedPluginsToUpdate.addAll(PluginUpdateDialog.getSelectedDownloaders(myUpdatesForPlugins, dialog));
     }
 
     //noinspection UsagesOfObsoleteApi
@@ -230,7 +234,7 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
             command = UpdateInstaller.preparePatchCommand(List.of(myTestPatch), indicator);
           }
           else {
-            @SuppressWarnings("DataFlowIssue") var files = UpdateInstaller.downloadPatchChain(myPlatformUpdate.getPatches().getChain(), indicator);
+            var files = UpdateInstaller.downloadPatchChain(requireNonNull(myPlatformUpdate.getPatches()).getChain(), indicator);
             command = UpdateInstaller.preparePatchCommand(files, indicator);
           }
         }
@@ -245,16 +249,15 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
           var message = IdeBundle.message("update.downloading.patch.error", e.getMessage());
           UpdateChecker.getNotificationGroupForIdeUpdateResults()
             .createNotification(title, message, NotificationType.ERROR)
-            .addAction(NotificationAction.createSimpleExpiring(IdeBundle.message("update.downloading.patch.open"),
-                                                               () -> BrowserUtil.browse(downloadUrl)))
+            .addAction(NotificationAction.createSimpleExpiring(IdeBundle.message("update.downloading.patch.open"), () -> BrowserUtil.browse(downloadUrl)))
             .setDisplayId("ide.patch.download.failed")
             .notify(myProject);
 
           return;
         }
 
-        if (!ContainerUtil.isEmpty(myUpdatesForPlugins)) {
-          UpdateInstaller.installPluginUpdates(myUpdatesForPlugins, indicator);
+        if (!ContainerUtil.isEmpty(selectedPluginsToUpdate)) {
+          UpdateInstaller.installPluginUpdates(selectedPluginsToUpdate, indicator);
         }
 
         if (ApplicationManager.getApplication().isRestartCapable()) {
@@ -266,8 +269,7 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
             var message = IdeBundle.message("update.ready.message");
             UpdateChecker.getNotificationGroupForIdeUpdateResults()
               .createNotification(title, message, NotificationType.INFORMATION)
-              .addAction(NotificationAction.createSimpleExpiring(IdeBundle.message("update.ready.restart"),
-                                                                 () -> restartLaterAndRunCommand(command)))
+              .addAction(NotificationAction.createSimpleExpiring(IdeBundle.message("update.ready.restart"), () -> restartLaterAndRunCommand(command)))
               .setDisplayId("ide.update.suggest.restart")
               .notify(myProject);
           }
@@ -282,6 +284,7 @@ public final class PlatformUpdateDialog extends AbstractUpdateDialog {
   private static void restartLaterAndRunCommand(String[] command) {
     IdeUpdateUsageTriggerCollector.UPDATE_STARTED.log();
     PropertiesComponent.getInstance().setValue(SELF_UPDATE_STARTED_FOR_BUILD_PROPERTY, ApplicationInfo.getInstance().getBuild().asString());
+    Restarter.setRestarterEnv(Map.of(ConfigImportHelper.IMPORT_FROM_ENV_VAR, PathManager.getConfigDir().toString()));
     var app = (ApplicationEx)ApplicationManager.getApplication();
     app.invokeLater(() -> app.restart(ApplicationEx.EXIT_CONFIRMED | ApplicationEx.SAVE, command));
   }

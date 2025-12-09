@@ -21,6 +21,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.ModificationTracker
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.FileUtilRt.extensionEquals
@@ -44,6 +45,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 
 private val LOG = logger<SpellCheckerManager>()
@@ -64,7 +66,7 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
 
   @get:Internal
   val appDictionaryPath: String by lazy {
-    PathManager.getOptionsPath() + File.separator + CACHED_DICTIONARY_FILE
+    PathManager.getOptionsPath() + '/' + CACHED_DICTIONARY_FILE
   }
 
   private val userDictionaryListenerEventDispatcher = EventDispatcher.create(DictionaryStateListener::class.java)
@@ -100,6 +102,10 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
     @JvmStatic
     val runtimeDictionaries: List<Dictionary>
       get() = RuntimeDictionaryProvider.EP_NAME.extensionList.flatMap { it.dictionaries.asSequence() }
+
+    private val dictionaryChangedCounter = AtomicLong(0)
+    val dictionaryModificationTracker: ModificationTracker
+      get() = ModificationTracker { dictionaryChangedCounter.get() }
 
     fun restartInspections(reason: Any) {
       ApplicationManager.getApplication().invokeLater {
@@ -274,6 +280,7 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
   }
 
   private fun fireDictionaryChanged(dictionary: EditableDictionary) {
+    dictionaryChangedCounter.incrementAndGet()
     userDictionaryListenerEventDispatcher.multicaster.dictChanged(dictionary)
     restartInspections("SpellCheckerManager.fireDictionaryChanged")
     SaveAndSyncHandler.getInstance().scheduleProjectSave(project, forceSavingAllSettings = true)
@@ -318,8 +325,7 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
   }
 
   fun openDictionaryInEditor(dictPath: String) {
-    val file = if (dictPath.isEmpty()) null
-    else LocalFileSystem.getInstance().refreshAndFindFileByPath(dictPath)
+    val file = if (dictPath.isEmpty()) null else LocalFileSystem.getInstance().refreshAndFindFileByPath(dictPath)
     if (file == null) {
       val title = SpellCheckerBundle.message("dictionary.not.found.title")
       val message = SpellCheckerBundle.message("dictionary.not.found", dictPath)
@@ -474,7 +480,7 @@ private class StreamLoader(private val name: String, private val loaderClass: Cl
 }
 
 private fun getProjectDictionaryPath(): String {
-  return "dictionaries${File.separator}${getProjectDictionaryName().replace('.', '_')}.xml"
+  return "dictionaries/${getProjectDictionaryName().replace('.', '_')}.xml"
 }
 
 internal fun getProjectDictionaryName(): String {

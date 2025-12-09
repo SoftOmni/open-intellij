@@ -1,10 +1,10 @@
-<idea-plugin xmlns:xi="http://www.w3.org/2001/XInclude" package="com.intellij.sh" allow-bundled-update="true">
+<idea-plugin xmlns:xi="http://www.w3.org/2001/XInclude" allow-bundled-update="true">
   <id>com.jetbrains.sh</id>
   <vendor>JetBrains</vendor>
   <name>Shell Script</name>
   <category>Languages</category>
 
-  <content>
+  <content namespace="jetbrains">
     <module name="intellij.sh.core" loading="embedded"/>
     <module name="intellij.sh.backend"/>
     <module name="intellij.sh.frontend.split"/>

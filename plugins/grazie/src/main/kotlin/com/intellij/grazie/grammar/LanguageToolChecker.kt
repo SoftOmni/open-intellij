@@ -1,13 +1,13 @@
 package com.intellij.grazie.grammar
 
 import com.intellij.grazie.GrazieBundle
+import com.intellij.grazie.GrazieConfig
 import com.intellij.grazie.GraziePlugin
-import com.intellij.grazie.detection.LangDetector
+import com.intellij.grazie.detection.toAvailableLang
 import com.intellij.grazie.ide.ui.components.utils.html
 import com.intellij.grazie.jlanguage.Lang
 import com.intellij.grazie.jlanguage.LangTool
 import com.intellij.grazie.text.*
-import com.intellij.grazie.utils.NaturalTextDetector
 import com.intellij.grazie.utils.TextStyleDomain
 import com.intellij.grazie.utils.getTextDomain
 import com.intellij.grazie.utils.trimToNull
@@ -50,18 +50,12 @@ open class LanguageToolChecker : ExternalTextChecker() {
   }
 
   @OptIn(DelicateCoroutinesApi::class)
-  override suspend fun checkExternally(content: TextContent): List<Problem> {
-    val text = content.toString()
-    if (text.isBlank() || !NaturalTextDetector.seemsNatural(text)) {
-      return emptyList()
-    }
-
-    val domain = content.getTextDomain()
-    val language = LangDetector.getLang(text) ?: return emptyList()
+  override suspend fun checkExternally(context: ProofreadingContext): List<Problem> {
+    val domain = context.text.getTextDomain()
     return computeDetached(Dispatchers.Default) {
       try {
         computeWithClassLoader<List<Problem>, Throwable>(GraziePlugin.classLoader) {
-          collectLanguageToolProblems(content, text, language, domain)
+          collectLanguageToolProblems(context.text, context.language.toAvailableLang(), domain)
         }
       }
       catch (exception: Throwable) {
@@ -74,15 +68,18 @@ open class LanguageToolChecker : ExternalTextChecker() {
     }
   }
 
-  private fun collectLanguageToolProblems(extracted: TextContent, text: String, lang: Lang, domain: TextStyleDomain): List<Problem> {
+  private fun collectLanguageToolProblems(extracted: TextContent, lang: Lang, domain: TextStyleDomain): List<Problem> {
     val tool = LangTool.getTool(lang, domain)
-    val sentences = tool.sentenceTokenize(text)
+    val sentences = tool.sentenceTokenize(extracted.toString())
     if (sentences.any { it.length > 1000 }) {
       return emptyList()
     }
-    val matches = runLT(tool, text)
+
+    val matches = runLT(tool, extracted.toString())
     val disappearsAfterAddingQuotes by lazy { checkQuotedText(extracted, tool) }
+    val state = GrazieConfig.get()
     return matches.asSequence()
+      .filter { LanguageToolRule(lang, it.rule, isEnabledByLanguageTool = true).isEnabledInState(state, domain) }
       .filterNot { possiblyMarkupDependent(it) && disappearsAfterAddingQuotes.test(it) }
       .map { Problem(it, lang, extracted, this is TestChecker) }
       .filterNot { isGitCherryPickedFrom(it.match, extracted) }
@@ -183,6 +180,7 @@ open class LanguageToolChecker : ExternalTextChecker() {
       return LanguageToolRule.isStyleLike(match.rule)
     }
   }
+
 }
 
 private val logger = LoggerFactory.getLogger(LanguageToolChecker::class.java)
@@ -191,6 +189,17 @@ private val sentenceSeparationRules = setOf("LC_AFTER_PERIOD", "PUNT_GEEN_HL", "
 private val openClosedRangeStart = Regex("[\\[(].+?(\\.\\.|:|,|;).+[])]")
 private val openClosedRangeEnd = Regex(".*" + openClosedRangeStart.pattern)
 private val quotedLiteralPattern = Regex("['\"]\\S+['\"]")
+private val nextWordPattern = Regex("\\s+(\\w+)")
+private val an_vs_a_exclusions = mapOf(
+  "an" to listOf(
+    Regex("xlsx", RegexOption.IGNORE_CASE),
+    Regex("mp3", RegexOption.IGNORE_CASE)
+  ),
+  "a" to listOf(
+    Regex("uint.*", RegexOption.IGNORE_CASE),
+    Regex("SCORM", RegexOption.IGNORE_CASE)
+  )
+)
 
 internal fun grammarRules(tool: JLanguageTool, lang: Lang): List<LanguageToolRule> {
   return tool.allRules.asSequence()
@@ -254,6 +263,14 @@ private fun isKnownLTBug(match: RuleMatch, text: TextContent): Boolean {
 
   if (match.rule.fullId == "UP_TO_DATE_HYPHEN[1]") {
     return true // https://github.com/languagetool-org/languagetool/issues/8285
+  }
+
+  // https://github.com/languagetool-org/languagetool/issues/11598
+  if (match.rule.id == "EN_A_VS_AN") {
+    val article = text.substring(match.fromPos, match.toPos)
+    val nextWordMatch = nextWordPattern.find(text.subSequence(match.toPos, text.length))
+    val nextWord = nextWordMatch?.groupValues?.get(1) ?: return false
+    return an_vs_a_exclusions[article.lowercase()]!!.any { regex -> regex.matches(nextWord) }
   }
 
   return false

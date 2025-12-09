@@ -4,8 +4,9 @@ package com.intellij.xdebugger.impl.ui
 import com.intellij.execution.RunContentDescriptorIdImpl
 import com.intellij.ide.CustomDataContextSerializer
 import com.intellij.openapi.actionSystem.DataKey
+import com.intellij.platform.debugger.impl.rpc.ExecutionEnvironmentId
 import com.intellij.platform.debugger.impl.rpc.XDebuggerTreeSelectedValueId
-import com.intellij.xdebugger.impl.rpc.ExecutionEnvironmentId
+import com.intellij.platform.debugger.impl.rpc.XExecutionStackId
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 
@@ -28,4 +29,11 @@ private class XDebuggerTreeSelectedValuesSerializer : CustomDataContextSerialize
     get() = SplitDebuggerUIUtil.SPLIT_SELECTED_VALUES_KEY
   override val serializer: KSerializer<List<XDebuggerTreeSelectedValueId>>
     get() = ListSerializer(XDebuggerTreeSelectedValueId.serializer())
+}
+
+private class XDebuggerTreeSelectedStacksSerializer : CustomDataContextSerializer<List<XExecutionStackId>> {
+  override val key: DataKey<List<XExecutionStackId>>
+    get() = SplitDebuggerUIUtil.SPLIT_SELECTED_STACKS_KEY
+  override val serializer: KSerializer<List<XExecutionStackId>>
+    get() = ListSerializer(XExecutionStackId.serializer())
 }

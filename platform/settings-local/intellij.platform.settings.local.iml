@@ -42,11 +42,11 @@
     <orderEntry type="module" module-name="intellij.libraries.kotlinx.serialization.core" />
     <orderEntry type="module" module-name="intellij.platform.projectModel.impl" />
     <orderEntry type="module" module-name="intellij.platform.ide.core" />
-    <orderEntry type="library" name="kotlinx-serialization-protobuf" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.kotlinx.serialization.protobuf" />
     <orderEntry type="module" module-name="intellij.platform.diagnostic.telemetry" />
     <orderEntry type="library" name="opentelemetry" level="project" />
     <orderEntry type="library" name="opentelemetry-semconv" level="project" />
-    <orderEntry type="library" name="mvstore" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.mvstore" />
     <orderEntry type="module" module-name="intellij.libraries.jackson" />
     <orderEntry type="module" module-name="intellij.platform.testFramework.junit5" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.core.impl" scope="TEST" />
@@ -69,7 +69,7 @@
       </library>
     </orderEntry>
     <orderEntry type="module" module-name="intellij.libraries.jackson.databind" scope="TEST" />
-    <orderEntry type="library" scope="TEST" name="jackson-dataformat-yaml" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.jackson.dataformat.yaml" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.util.jdom" />
     <orderEntry type="module" module-name="intellij.platform.util.xmlDom" />
     <orderEntry type="module" module-name="intellij.platform.util" />
@@ -78,6 +78,6 @@
     <orderEntry type="module" module-name="intellij.libraries.aalto.xml" />
     <orderEntry type="module" module-name="intellij.idea.community.customization" scope="TEST" />
     <orderEntry type="module" module-name="intellij.platform.testFramework.core" scope="TEST" />
-    <orderEntry type="library" name="kotlinx-serialization-cbor" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.kotlinx.serialization.cbor" />
   </component>
 </module>

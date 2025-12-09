@@ -23,6 +23,7 @@ import com.intellij.ui.jcef.*
 import com.intellij.ui.jcef.utils.JBCefLocalRequestHandler
 import com.intellij.ui.jcef.utils.JBCefStreamResourceHandler
 import com.intellij.util.IncorrectOperationException
+import com.intellij.util.ui.EDT
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.cef.browser.CefBrowser
@@ -113,7 +114,7 @@ class JCefImageViewer(private val myFile: VirtualFile,
   override fun getState(level: FileEditorStateLevel): FileEditorState =
     ImageFileEditorState(myState.chessboardEnabled, myState.gridEnabled, myState.zoom, !myState.realSize)
   override fun setState(state: FileEditorState) {
-    if (!SwingUtilities.isEventDispatchThread()) {
+    if (!EDT.isCurrentThreadEdt()) {
       SwingUtilities.invokeLater { setState(state) }
       return
     }
@@ -164,7 +165,7 @@ class JCefImageViewer(private val myFile: VirtualFile,
   override fun getZoomModel(): ImageZoomModel = ZOOM_MODEL
   override fun isGridVisible(): Boolean = myState.status == ViewerState.Status.OK && myState.gridEnabled
   fun getZoom() = myState.zoom
-  private fun execute(@Language("javascript") script: String) = myBrowser.cefBrowser.executeJavaScript(script, myBrowser.cefBrowser.url, 0)
+  private fun execute(@Language("javascript") script: String) = myBrowser.runJavaScript(script, myBrowser.cefBrowser.url, 0)
 
   private val ZOOM_MODEL: ImageZoomModel = object : ImageZoomModel {
     override fun getZoomFactor(): Double = myState.zoom

@@ -98,7 +98,7 @@ public class ShowDiffFromLocalChangesActionProvider implements AnActionExtension
       // this trick is essential since we are under some conditions to refresh changes;
       // but we can only rely on callback after refresh
       ChangeListManager.getInstance(project).invokeAfterUpdate(true, () -> {
-        ChangesViewManager.getInstanceEx(project).promiseRefresh().onProcessed(__ -> {
+        ChangesViewManager.getInstanceEx(project).scheduleRefresh(() -> {
           try {
             List<? extends Change> actualChanges = loadFakeRevisions(project, changes);
             resultRef.complete(collectRequestProducers(project, actualChanges, unversioned, view));
@@ -197,7 +197,7 @@ public class ShowDiffFromLocalChangesActionProvider implements AnActionExtension
   }
 
   private static void setAllowExcludeFromCommit(@NotNull Project project, @NotNull DiffRequestChain chain) {
-    boolean allowExcludeFromCommit = ChangesViewManager.getInstanceEx(project).isAllowExcludeFromCommit();
+    boolean allowExcludeFromCommit = ChangesViewWorkflowManager.getInstance(project).getAllowExcludeFromCommit().getValue();
     chain.putUserData(ALLOW_EXCLUDE_FROM_COMMIT, allowExcludeFromCommit);
   }
 }

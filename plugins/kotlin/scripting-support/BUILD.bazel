@@ -15,7 +15,7 @@ jvm_library(
   deps = [
     "//platform/analysis-api:analysis",
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlin-reflect",
+    "//libraries/kotlin/reflect",
     "@lib//:junit4",
     "@lib//:kotlinc-kotlin-compiler-common",
     "@lib//:kotlinc-kotlin-compiler-tests",
@@ -49,7 +49,7 @@ jvm_library(
     "//platform/vcs-impl",
     "//platform/vcs-impl:vcs-impl_test_lib",
     "//java/java-psi-api:psi",
-    "//plugins/kotlin/kotlin.ide:ide",
+    "//plugins/kotlin/kotlin.ide",
     "//plugins/kotlin/jvm/k1",
     "//plugins/kotlin/base/scripting/scripting.k1",
     "//plugins/kotlin/base/scripting/scripting.k1:scripting.k1_test_lib",

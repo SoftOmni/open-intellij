@@ -19,6 +19,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -34,7 +35,11 @@ public final class JUnit5TeamCityRunnerForTestsOnClasspath {
 
     System.out.println(new TestStarted(testName, true, null));
     if (e != null) {
-      System.out.println(new TestFailed(testName, e));
+      var testFailedServiceMessage = new TestFailed(testName, e).toString();
+      if (!isLeak(testFailedServiceMessage)) {
+        // leaks are already checked by _LastInSuiteTest.testProjectLeak
+        System.out.println(testFailedServiceMessage);
+      }
     }
     System.out.println(new TestFinished(testName, 0));
   }
@@ -109,10 +114,19 @@ public final class JUnit5TeamCityRunnerForTestsOnClasspath {
     if (paths == null) return null;
     // Skip unrelated jars and any other archives, otherwise we will end up with test classes from dependencies.
     String relevantJarsRoot = System.getProperty("intellij.test.jars.location");
+    if (relevantJarsRoot == null) {
+      String bazelOutPattern = Paths.get("bazel-out", "jvm-fastbuild").toString();
+      String jar = paths.stream().map(Path::toString).filter(s -> s.contains(bazelOutPattern)).findFirst().orElse(null);
+      int index = jar != null ? jar.indexOf(bazelOutPattern) : -1;
+      if (index != -1) {
+        relevantJarsRoot = jar.substring(0, index + bazelOutPattern.length());
+      }
+    }
+    String finalRelevantJarsRoot = relevantJarsRoot;
     return paths.stream()
       .filter(path ->
                 Files.isDirectory(path) ||
-                (relevantJarsRoot != null && path.getFileName().toString().endsWith(".jar") && path.startsWith(relevantJarsRoot)))
+                (finalRelevantJarsRoot != null && path.getFileName().toString().endsWith(".jar") && path.startsWith(finalRelevantJarsRoot)))
       .collect(Collectors.toSet());
   }
 
@@ -209,5 +223,14 @@ public final class JUnit5TeamCityRunnerForTestsOnClasspath {
       e.printStackTrace();
       System.exit(1);
     }
+  }
+
+  private static boolean isLeak(String testFailedServiceMessage) {
+    return
+      // copied from com.intellij.testFramework.LeakHunter#getLeakedObjectDetails
+      testFailedServiceMessage.contains("Found a leaked instance of") ||
+      // copied from com.intellij.openapi.util.ObjectNode#assertNoChildren
+      testFailedServiceMessage.contains("Memory leak detected") &&
+      testFailedServiceMessage.contains("was registered in Disposer");
   }
 }

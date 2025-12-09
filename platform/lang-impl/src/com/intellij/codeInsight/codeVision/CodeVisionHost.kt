@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.codeVision
 
 import com.intellij.codeInsight.codeVision.settings.CodeVisionGroupDefaultSettingModel
@@ -52,6 +52,7 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.Alarm
 import com.intellij.util.application
 import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.update.MergingUpdateQueue
 import com.intellij.util.ui.update.Update
@@ -67,7 +68,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.annotations.TestOnly
 import java.util.concurrent.CompletableFuture
-import javax.swing.SwingUtilities
 import kotlin.time.Duration.Companion.milliseconds
 
 open class CodeVisionHost(val project: Project) {
@@ -108,6 +108,7 @@ open class CodeVisionHost(val project: Project) {
 
   private val defaultSortedProvidersList = mutableListOf<String>()
 
+  @RequiresEdt
   open fun initialize() {
     lifeSettingModel.isRegistryEnabled.whenTrue(codeVisionLifetime) { enableCodeVisionLifetime ->
       runReadAction {
@@ -121,6 +122,15 @@ open class CodeVisionHost(val project: Project) {
         subscribeCVSettingsChanged(enableCodeVisionLifetime)
       }
     }
+  }
+
+  @get:RequiresEdt
+  val isInitialised: Boolean get() = _isInitialised
+  private var _isInitialised = false
+
+  @RequiresEdt
+  fun finishInitialisation() {
+    _isInitialised = true
   }
 
   open fun collectAllProviders(): List<Pair<String, CodeVisionProvider<*>>> {
@@ -442,6 +452,7 @@ open class CodeVisionHost(val project: Project) {
     }
 
     subscribeForContextChanged(editor, editorLifetime) {
+      ModificationStampUtil.clearModificationStamp(editor)
       pokeEditor()
     }
 

@@ -9,8 +9,8 @@
         <xs:element type="buildType" name="build"/>
         <xs:element type="logoType" name="logo"/>
         <xs:element type="logoType" name="logo-eap" minOccurs="0"/>
-        <xs:element type="logoType" name="logo-free-mode" minOccurs="0"/>
         <xs:element type="logoType" name="logo-simplified" minOccurs="0"/>
+        <xs:element type="logoType" name="logo-subscription-mode" minOccurs="0"/>
         <xs:element type="iconType" name="icon"/>
         <xs:element type="iconEapType" name="icon-eap" minOccurs="0"/>
         <xs:element type="namesType" name="names"/>
@@ -166,7 +166,7 @@
       <xs:annotation>
         <xs:documentation>
           Specifies the full build number in format '&lt;product code&gt;-__BUILD__'. &lt;product code&gt; is a unique product code
-          (e.g., IU for IntelliJ IDEA Ultimate Edition, IC for IntelliJ IDEA Community Edition), and __BUILD__ is a placeholder
+          (e.g., IU for IntelliJ IDEA, IC for IntelliJ IDEA Community Edition), and __BUILD__ is a placeholder
           that will be replaced by the real build number (two or more numbers separated by dots) by the build scripts.
         </xs:documentation>
       </xs:annotation>

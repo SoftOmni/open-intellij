@@ -33,7 +33,8 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="kotlin-stdlib" level="project" />
-    <orderEntry type="library" name="rd-core" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.rd.core" />
+    <orderEntry type="module" module-name="intellij.libraries.rd.framework" />
     <orderEntry type="module" module-name="intellij.platform.editor.ui" />
     <orderEntry type="module" module-name="intellij.platform.projectModel" />
     <orderEntry type="module" module-name="intellij.platform.util" />
@@ -44,9 +45,9 @@
     <orderEntry type="module" module-name="intellij.platform.analysis" />
     <orderEntry type="library" name="jna" level="project" />
     <orderEntry type="library" name="download-pgp-verifier" level="project" />
-    <orderEntry type="library" name="bouncy-castle-pgp" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.bouncy.castle.pgp" />
     <orderEntry type="module" module-name="intellij.platform.ide.impl" />
-    <orderEntry type="library" name="miglayout-swing" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.miglayout.swing" />
     <orderEntry type="module" module-name="intellij.libraries.jackson" />
     <orderEntry type="module" module-name="intellij.libraries.jackson.databind" />
     <orderEntry type="module" module-name="intellij.platform.rd.community" />
@@ -59,7 +60,7 @@
     <orderEntry type="module" module-name="intellij.libraries.kotlinx.serialization.core" />
     <orderEntry type="module" module-name="intellij.libraries.kotlinx.serialization.json" />
     <orderEntry type="module" module-name="intellij.platform.core.ui" />
-    <orderEntry type="library" name="kotlin-reflect" level="project" />
+    <orderEntry type="module" module-name="intellij.libraries.kotlin.reflect" />
     <orderEntry type="module" module-name="intellij.platform.ide.core.impl" />
     <orderEntry type="library" name="rd-gen" level="project" />
     <orderEntry type="library" name="opentelemetry" level="project" />

@@ -17,8 +17,10 @@ jvm_library(
     "//platform/analysis-api:analysis",
     "//platform/util/concurrency",
     "//platform/core-api:core",
+    "//platform/lang-api:lang",
     "//platform/editor-ui-api:editor-ui",
     "//platform/projectModel-api:projectModel",
+    "//platform/core-impl",
     "//platform/refactoring",
     "//platform/structure-view-impl:structureView-impl",
     "//platform/util",
@@ -31,8 +33,9 @@ jvm_library(
     "//platform/editor-ui-ex:editor-ex",
     "//platform/platform-impl:ide-impl",
     "//platform/core-ui",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/util/jdom",
+    "//platform/forms_rt:java-guiForms-rt",
   ],
   runtime_deps = ["//platform/backend"]
 )
@@ -47,8 +50,10 @@ jvm_library(
     "//platform/util/concurrency",
     "//platform/util/concurrency:concurrency_test_lib",
     "//platform/core-api:core",
+    "//platform/lang-api:lang",
     "//platform/editor-ui-api:editor-ui",
     "//platform/projectModel-api:projectModel",
+    "//platform/core-impl",
     "//platform/refactoring",
     "//platform/structure-view-impl:structureView-impl",
     "//platform/util",
@@ -63,8 +68,9 @@ jvm_library(
     "//platform/testFramework",
     "//platform/testFramework:testFramework_test_lib",
     "//platform/core-ui",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/util/jdom",
+    "//platform/forms_rt:java-guiForms-rt",
   ]
 )
 ### auto-generated section `build intellij.properties.resource.bundle.editor` end

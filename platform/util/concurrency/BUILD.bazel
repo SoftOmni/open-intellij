@@ -8,10 +8,10 @@ jvm_library(
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/coroutines/core",
     "//platform/util",
     "//platform/core-api:core",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/diagnostic",
     "//platform/util/coroutines",
   ]
@@ -24,10 +24,10 @@ jvm_library(
   associates = [":concurrency"],
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/coroutines/core",
     "//platform/util",
     "//platform/core-api:core",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/diagnostic",
     "//platform/util/coroutines",
     "@lib//:assert_j",

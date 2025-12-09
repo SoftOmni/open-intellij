@@ -1,31 +1,24 @@
 package com.intellij.grazie.mlec
 
-import ai.grazie.gec.model.problem.Problem
 import ai.grazie.gec.model.problem.SentenceWithProblems
 import ai.grazie.nlp.langs.Language
 import ai.grazie.nlp.langs.locale
+import ai.grazie.rules.settings.RuleSetting
 import ai.grazie.text.exclusions.SentenceWithExclusions
 import com.intellij.codeInspection.util.InspectionMessage
 import com.intellij.grazie.GrazieConfig
+import com.intellij.grazie.cloud.APIQueries
 import com.intellij.grazie.cloud.GrazieCloudConnector
 import com.intellij.grazie.rule.SentenceBatcher
-import com.intellij.grazie.rule.SentenceTokenizer.Sentence
-import com.intellij.grazie.rule.SentenceTokenizer.tokenize
 import com.intellij.grazie.text.*
 import com.intellij.grazie.utils.*
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.psi.FileViewProvider
-import org.slf4j.LoggerFactory
 import java.util.*
-import kotlin.coroutines.cancellation.CancellationException
-
-private val logger = LoggerFactory.getLogger(MlecChecker::class.java)
 
 class MlecChecker : ExternalTextChecker() {
   private val incompleteSentenceMessages = setOf(
@@ -39,30 +32,27 @@ class MlecChecker : ExternalTextChecker() {
     return rules
   }
 
-  override suspend fun checkExternally(content: TextContent): Collection<TextProblem> {
-    if (!GrazieCloudConnector.seemsCloudConnected() || !NaturalTextDetector.seemsNatural(content.toString())) return emptyList()
-    if (HighlightingUtil.skipExpensivePrecommitAnalysis(content.containingFile)) return emptyList()
+  override suspend fun checkExternally(context: ProofreadingContext): Collection<TextProblem> {
+    if (!GrazieCloudConnector.seemsCloudConnected()) return emptyList()
 
-    val stripPrefixLength = HighlightingUtil.stripPrefix(content)
-    val detected = getLanguageIfAvailable(content.toString().substring(stripPrefixLength)) ?: return emptyList()
-    val rules = Constants.mlecRules[detected] ?: return emptyList()
-    if (rules.none { it.isCurrentlyEnabled(content) }) return emptyList()
+    val rules = Constants.mlecRules[context.language] ?: return emptyList()
+    if (rules.none { it.isCurrentlyEnabled(context.text) }) return emptyList()
 
-    val typos = getTypos(detected, content, stripPrefixLength).takeIf { it.isNotEmpty() } ?: return emptyList()
+    val typos = getProblems(context, MlecServerBatcherHolder::class.java)?.takeIf { it.isNotEmpty() } ?: return emptyList()
 
     return typos
       .mapNotNull { typo ->
         val underline: TextRange = typo.highlighting.underline ?: return@mapNotNull null
 
         val fixes = typo.fixes.map { it.display() }
-        val errorText = underline.substring(content.toString())
+        val errorText = underline.substring(context.text.toString())
 
         val rule =
-          if (detected == Language.ENGLISH && typo.info.id.id.endsWith("article.missing")) Constants.enMissingArticle
+          if (context.language == Language.ENGLISH && typo.info.id.id.endsWith("article.missing")) Constants.enMissingArticle
           else rules.last()
-        if (!rule.isCurrentlyEnabled(content)) return@mapNotNull null
+        if (!rule.isCurrentlyEnabled(context.text)) return@mapNotNull null
 
-        object : GrazieProblem(typo, rule, content) {
+        object : GrazieProblem(typo, rule, context.text) {
           override fun getDescriptionTemplate(isOnTheFly: Boolean): @InspectionMessage String {
             val description = super.getDescriptionTemplate(isOnTheFly)
             if (ApplicationManager.getApplication().isUnitTestMode()) return "${rule.globalId}: $description"
@@ -71,17 +61,17 @@ class MlecChecker : ExternalTextChecker() {
 
           override fun fitsGroup(group: RuleGroup): Boolean {
             if (RuleGroup.SENTENCE_START_CASE in group.rules && StringUtil.capitalize(errorText) in fixes) {
-              val prev = content.subSequence(0, underline.startOffset).toString().trim()
+              val prev = context.text.subSequence(0, underline.startOffset).toString().trim()
               if (prev.isBlank() ||
                   Text.Latin.isEndPunctuation(prev) ||
-                  Text.findParagraphRange(content, underline).startOffset == underline.startOffset) {
+                  Text.findParagraphRange(context.text, underline).startOffset == underline.startOffset) {
                 return true
               }
             }
 
             if (RuleGroup.SENTENCE_END_PUNCTUATION in group.rules && "$errorText." in fixes) {
-              return content.subSequence(underline.endOffset, content.length).isBlank() ||
-                     Text.findParagraphRange(content, underline).endOffset == underline.endOffset
+              return context.text.subSequence(underline.endOffset, context.text.length).isBlank() ||
+                     Text.findParagraphRange(context.text, underline).endOffset == underline.endOffset
             }
 
             if (RuleGroup.INCOMPLETE_SENTENCE in group.rules && typo.message in incompleteSentenceMessages) {
@@ -92,47 +82,6 @@ class MlecChecker : ExternalTextChecker() {
           }
         }
       }
-  }
-
-  private suspend fun getTypos(language: Language, text: TextContent, stripPrefixLength: Int): List<Problem> {
-    val subText = text.subText(TextRange(stripPrefixLength, text.length)) ?: return emptyList()
-    val sentences = tokenize(subText)
-    val parsed: Map<SentenceWithExclusions, SentenceWithProblems?>? = runMlec(sentences, language, text.containingFile.viewProvider)
-    if (parsed.isNullOrEmpty()) return emptyList()
-
-    val result = ArrayList<Problem>()
-    for (sentence in sentences) {
-      val corrections = parsed[sentence.swe()]?.problems ?: continue
-      val start = sentence.start + stripPrefixLength
-      if (!text.hasUnknownFragmentsIn(TextRange.from(start, sentence.text.trimEnd().length))) {
-        corrections.forEach {
-          result.add(it.withOffset(start))
-        }
-      }
-    }
-    return result
-  }
-
-  private suspend fun runMlec(
-    sentences: List<Sentence>, language: Language,
-    vp: FileViewProvider,
-  ): Map<SentenceWithExclusions, SentenceWithProblems?>? {
-    val queries = sentences.map { it.swe() }
-    if (!GrazieCloudConnector.seemsCloudConnected()) {
-      return LinkedHashMap()
-    }
-
-    return try {
-      val parser = service<ServerBatcherHolder>().get(language)?.forFile(vp)
-      parser?.parseAsync(queries)
-    }
-    catch (e: CancellationException) {
-      throw e
-    }
-    catch (e: RuntimeException) {
-      logger.warn("Got exception from MLEC", e)
-      LinkedHashMap()
-    }
   }
 
   @Suppress("NonAsciiCharacters")
@@ -179,20 +128,27 @@ class MlecChecker : ExternalTextChecker() {
     private fun mlecRule(id: String, language: Language, presentableName: String, category: String, description: String): Rule =
       object : Rule(id, language, presentableName, category) {
         override fun getDescription(): String = description
+        override fun isEnabledByDefault(domain: TextStyleDomain): Boolean {
+          if (this.globalId != enMissingArticle.globalId) return super.isEnabledByDefault(domain)
+          return featuredSettings(Language.ENGLISH).asSequence()
+            .filterIsInstance<RuleSetting>()
+            .map { it.rule }
+            .find { it.id == "Grammar.MISSING_ARTICLE" }!!
+            .isEnabledInState(GrazieConfig.get(), domain)
+        }
       }
   }
 
   @Service
-  private class ServerBatcherHolder : LanguageHolder<SentenceBatcher<SentenceWithProblems>>() {
+  private class MlecServerBatcherHolder : LanguageHolder<SentenceBatcher<SentenceWithProblems>>() {
     private class ServerBatcher(
       language: Language,
     ) : SentenceBatcher<SentenceWithProblems>(language, 32), Disposable {
       override suspend fun parse(sentences: List<SentenceWithExclusions>, project: Project): Map<SentenceWithExclusions, SentenceWithProblems> {
-        if (GrazieCloudConnector.EP_NAME.extensionList.any { it.isAfterRecentGecError() }) {
+        if (GrazieCloudConnector.isAfterRecentGecError()) {
           return emptyMap()
         }
-        return GrazieCloudConnector.EP_NAME.extensionList
-                 .firstNotNullOfOrNull { it.mlec(sentences, language, project) }
+        return APIQueries.mlec(sentences, language, project)
                  ?.zip(sentences)
                  ?.associate { it.second to it.first }
                ?: emptyMap()
@@ -204,7 +160,7 @@ class MlecChecker : ExternalTextChecker() {
         GrazieConfig.subscribe(this) {
           clearCache()
         }
-        GrazieCloudConnector.EP_NAME.forEachExtensionSafe { it.subscribeToAuthorizationStateEvents(this) { clearCache() } }
+        GrazieCloudConnector.subscribeToAuthorizationStateEvents(this) { clearCache() }
       }
     }
 

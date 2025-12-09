@@ -7,6 +7,8 @@ import com.intellij.extapi.psi.StubBasedPsiElementBase
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
@@ -32,6 +34,7 @@ import org.jetbrains.kotlin.analysis.api.renderer.declarations.renderers.callabl
 import org.jetbrains.kotlin.analysis.api.renderer.types.KaExpandedTypeRenderingMode
 import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.symbol
+import org.jetbrains.kotlin.idea.base.analysis.api.utils.collectPossibleReferenceShorteningsForIde
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.invokeShortening
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.core.insertMembersAfter
@@ -75,7 +78,7 @@ abstract class KtGenerateMembersHandler(
                 val declarations = block.declarations.mapNotNull { it.element }
                 val first = declarations.firstOrNull() ?: return@mapNotNull null
                 val last = declarations.last()
-                collectPossibleReferenceShortenings(first.containingKtFile, TextRange(first.startOffset, last.endOffset))
+                collectPossibleReferenceShorteningsForIde(first.containingKtFile, TextRange(first.startOffset, last.endOffset))
             }
         }
 
@@ -97,7 +100,16 @@ abstract class KtGenerateMembersHandler(
                 }
             }
             insertedBlocks.firstOrNull()?.declarations?.firstNotNullOfOrNull { it.element }?.let {
-                moveCaretIntoGeneratedElement(editor, it)
+
+                val fileEditorManager = FileEditorManager.getInstance(project)
+                val targetVirtualFile = it.containingFile.virtualFile
+                val openInEditor = if (fileEditorManager.currentFile != targetVirtualFile) {
+                    fileEditorManager.openTextEditor(OpenFileDescriptor(project, targetVirtualFile), true)
+                } else {
+                    null
+                }
+
+                moveCaretIntoGeneratedElement(openInEditor ?: editor, it)
             }
         }
     }

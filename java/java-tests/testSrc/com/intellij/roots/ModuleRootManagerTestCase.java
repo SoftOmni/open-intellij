@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.roots;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -107,11 +107,11 @@ public abstract class ModuleRootManagerTestCase extends JavaModuleTestCase {
     });
   }
 
-  protected Library createAsmLibrary() {
-    return createLibrary("asm", getAsmJar(), null);
+  protected Library createSampleLibrary() {
+    return createLibrary("byte-buddy", getSampleLibJar(), null);
   }
 
-  protected VirtualFile getAsmJar() {
-    return IntelliJProjectConfiguration.getJarFromSingleJarProjectLibrary("ASM");
+  protected VirtualFile getSampleLibJar() {
+    return IntelliJProjectConfiguration.getJarFromSingleJarProjectLibrary("byte-buddy");
   }
 }

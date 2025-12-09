@@ -67,6 +67,7 @@ import org.jetbrains.annotations.*;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -204,7 +205,7 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
     registerFakeServices(this);
 
     myIsInternal = isInternal;
-    myTestModeFlag = false;
+    myTestModeFlag = Boolean.getBoolean("idea.is.unit.test");
     myHeadlessMode = AppMode.isHeadless();
     myCommandLineMode = AppMode.isCommandLine();
     if (!myHeadlessMode || SystemProperties.getBooleanProperty("allow.save.application.headless", false)) {
@@ -414,7 +415,7 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
     // Start from inner layer: transaction guard
     final var guarded = myTransactionGuard.wrapLaterInvocation(runnable, state);
     // Middle layer: lock and modality
-    final var locked = wrapWithRunIntendedWriteActionAndModality(guarded, ctxAware ? null : state);
+    final var locked = wrapWithRunIntendedWriteActionAndModality(guarded, true, ctxAware ? null : state);
     var finalRunnable = locked;
     // Outer layer, optional: context capture & reset
     if (propagateContext()) {
@@ -422,38 +423,14 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
       finalRunnable = captured.getFirst();
       expired = captured.getSecond();
     }
-    LaterInvocator.invokeLater(state, expired, finalRunnable);
+    LaterInvocator.invokeLater(state, expired, true, finalRunnable);
   }
 
   @ApiStatus.Internal
   @Override
-  public void dispatchCoroutineOnEDT(Runnable runnable, ModalityState state, boolean acquireWriteIntentLockInNonBlockingWay) {
+  public void dispatchCoroutineOnEDT(Runnable runnable, ModalityState state, boolean needsWriteIntent) {
     var wrapped = myTransactionGuard.wrapCoroutineInvocation(runnable, state);
-    if (acquireWriteIntentLockInNonBlockingWay) {
-      scheduleWithWeakWriteIntentReadAction(wrapped, state);
-    }
-    else {
-      LaterInvocator.invokeLater(state, Conditions.alwaysFalse(), wrapped);
-    }
-  }
-
-  private void scheduleWithWeakWriteIntentReadAction(@NotNull Runnable runnable, @NotNull ModalityState state) {
-    LaterInvocator.invokeLater(state, Conditions.alwaysFalse(), () -> {
-      var executedSuccessfully = lock.tryRunWriteIntentReadAction(() -> {
-        runnable.run();
-        return Unit.INSTANCE;
-      });
-      // we managed to acquire the write-intent lock
-      if (executedSuccessfully) {
-        return;
-      }
-      // if this computation failed to run on EDT, then it means that we have an alive write action
-      // let's reschedule this computation after the write action finishes.
-      lock.runWhenWriteActionIsCompleted(() -> {
-        scheduleWithWeakWriteIntentReadAction(runnable, state);
-        return Unit.INSTANCE;
-      });
-    });
+    LaterInvocator.invokeLater(state, Conditions.alwaysFalse(), needsWriteIntent, wrapped);
   }
 
   @Override
@@ -587,41 +564,56 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
     // Start from inner layer: transaction guard
     final var guarded = myTransactionGuard.wrapLaterInvocation(runnable, state);
     // Middle layer: lock and modality
-    final var locked = wrapWithLocks ? wrapWithRunIntendedWriteActionAndModality(guarded, ctxAware ? null : state) : guarded;
+    boolean wrapWithLocksDeep = wrapWithLocks && !ThreadingRuntimeFlagsKt.getUseNonBlockingFlushQueue();
+    final var locked = wrapWithRunIntendedWriteActionAndModality(guarded, wrapWithLocksDeep, ctxAware ? null : state);
     // Outer layer context capture & reset
     final var finalRunnable = AppImplKt.rethrowExceptions(AppScheduledExecutorService::captureContextCancellationForRunnableThatDoesNotOutliveContextScope, locked);
 
-    LaterInvocator.invokeAndWait(state, finalRunnable);
+    LaterInvocator.invokeAndWait(state, wrapWithLocks, finalRunnable);
   }
 
-  private @NotNull Runnable wrapWithRunIntendedWriteActionAndModality(@NotNull Runnable runnable, @Nullable ModalityState modalityState) {
-    return modalityState != null ?
-           new Runnable() {
-             @Override
-             public void run() {
-               ThreadContext.installThreadContext(ThreadContext.currentThreadContext().plus(asContextElement(modalityState)), true, () -> {
-                 runIntendedWriteActionOnCurrentThread(runnable);
-                 return Unit.INSTANCE;
-               });
-             }
+  private @NotNull Runnable wrapWithRunIntendedWriteActionAndModality(@NotNull Runnable runnable,
+                                                                      boolean wrapWithLocks,
+                                                                      @Nullable ModalityState modalityState) {
+    if (modalityState == null && wrapWithLocks) {
+      return new Runnable() {
+        @Override
+        public void run() {
+          runIntendedWriteActionOnCurrentThread(runnable);
+        }
 
-             @Override
-             public String toString() {
-               return runnable.toString();
-             }
-           }
-                                 :
-           new Runnable() {
-             @Override
-             public void run() {
-               runIntendedWriteActionOnCurrentThread(runnable);
-             }
+        @Override
+        public String toString() {
+          return runnable.toString();
+        }
+      };
+    }
+    else if (modalityState == null) {
+      // wrapWithLocks == false
+      return runnable;
+    }
+    else {
+      // modalityState != null
+      return new Runnable() {
+        @Override
+        public void run() {
+          ThreadContext.installThreadContext(ThreadContext.currentThreadContext().plus(asContextElement(modalityState)), true, () -> {
+            if (wrapWithLocks) {
+              runIntendedWriteActionOnCurrentThread(runnable);
+            }
+            else {
+              runnable.run();
+            }
+            return Unit.INSTANCE;
+          });
+        }
 
-             @Override
-             public String toString() {
-               return runnable.toString();
-             }
-           };
+        @Override
+        public String toString() {
+          return runnable.toString();
+        }
+      };
+    }
   }
 
   @Override
@@ -869,7 +861,7 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
       if (restart) {
         if (canRestart) {
           try {
-            Restarter.scheduleRestart(BitUtil.isSet(flags, ELEVATE), beforeRestart);
+            Restarter.scheduleRestart(BitUtil.isSet(flags, ELEVATE), List.of(beforeRestart));
           }
           catch (Throwable t) {
             logErrorDuringExit("Failed to restart the application", t);
@@ -917,7 +909,7 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
     @Nullable JComponent parentComponent,
     @Nullable @NlsContexts.Button String cancelText
   ) {
-    if (SwingUtilities.isEventDispatchThread()) {
+    if (EDT.isCurrentThreadEdt()) {
       return CompletableFuture.completedFuture(
         createProgressWindow(progressTitle, canBeCanceled, shouldShowModalWindow, project, parentComponent, cancelText));
     }
@@ -1114,7 +1106,9 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
       }
       else {
         var indicator = new EmptyProgressIndicator();
-        action.accept(indicator);
+        ProgressManager.getInstance().runProcess(() -> {
+          action.accept(indicator);
+        }, indicator);
         return !indicator.isCanceled();
       }
     });
@@ -1503,11 +1497,6 @@ public final class ApplicationImpl extends ClientAwareComponentManager implement
   @Override
   public void prohibitTakingLocksInsideAndRun(@NotNull Runnable runnable, boolean failSoftly, @NlsSafe String advice) {
     getThreadingSupport().prohibitTakingLocksInsideAndRun(runnable, failSoftly, advice);
-  }
-
-  @Override
-  public void allowTakingLocksInsideAndRun(@NotNull Runnable runnable) {
-    getThreadingSupport().allowTakingLocksInsideAndRun(runnable);
   }
 
   @Override

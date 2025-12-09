@@ -2,16 +2,18 @@
 package com.intellij.grazie.spellcheck;
 
 import ai.grazie.nlp.langs.LanguageISO;
+import ai.grazie.spell.suggestion.ranker.AsciiRanker;
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.options.OptPane;
 import com.intellij.grazie.GrazieConfig;
-import com.intellij.grazie.spellcheck.diacritic.Diacritics;
 import com.intellij.grazie.spellcheck.engine.GrazieSpellCheckerEngine;
+import com.intellij.grazie.text.CheckerRunner;
 import com.intellij.lang.LanguageNamesValidation;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.lang.refactoring.NamesValidator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
@@ -110,7 +112,7 @@ public final class GrazieSpellCheckingInspection extends SpellCheckingInspection
           element, strategy, session,
           typo -> {
             if (hasSameNamedReferenceInFile(typo.getWord(), element, strategy)) return;
-            registerProblem(typo, holder);
+            registerProblem(typo, element, holder);
           }
         );
         if (result == SpellCheckingResult.Checked) return;
@@ -147,15 +149,37 @@ public final class GrazieSpellCheckingInspection extends SpellCheckingInspection
     holder.registerProblem(problemDescriptor);
   }
 
+  private static void registerProblem(@NotNull TypoProblem typo, @NotNull PsiElement element, @NotNull ProblemsHolder holder) {
+    SpellcheckingStrategy strategy = getSpellcheckingStrategy(element);
+    CheckerRunner.fileHighlightRanges(typo)
+      .stream()
+      .reduce(TextRange::union)
+      .map(range -> range.shiftLeft(element.getTextRange().getStartOffset()))
+      .ifPresent(typoRange -> {
+        if (!holder.isOnTheFly()) {
+          addBatchDescriptor(element, typoRange, typo.getWord(), holder);
+          return;
+        }
+
+        Set<String> suggestions = typo.isCloud() ? typo.getFixes() : null;
+        LocalQuickFix[] fixes = strategy != null
+                                ? strategy.getRegularFixes(element, typoRange, false, typo.getWord(), suggestions)
+                                : SpellcheckingStrategy.getDefaultRegularFixes(false, typo.getWord(), element, typoRange, suggestions);
+
+        ProblemDescriptor problemDescriptor = createProblemDescriptor(element, typoRange, fixes, true);
+        holder.registerProblem(problemDescriptor);
+      });
+  }
+
   private static void addRegularDescriptor(@NotNull PsiElement element, @NotNull TextRange textRange, @NotNull ProblemsHolder holder,
                                            boolean useRename, String wordWithTypo) {
     SpellcheckingStrategy strategy = getSpellcheckingStrategy(element);
 
     LocalQuickFix[] fixes = strategy != null
-                            ? strategy.getRegularFixes(element, textRange, useRename, wordWithTypo)
-                            : SpellcheckingStrategy.getDefaultRegularFixes(useRename, wordWithTypo, element, textRange);
+                            ? strategy.getRegularFixes(element, textRange, useRename, wordWithTypo, null)
+                            : SpellcheckingStrategy.getDefaultRegularFixes(useRename, wordWithTypo, element, textRange, null);
 
-    final ProblemDescriptor problemDescriptor = createProblemDescriptor(element, textRange, fixes, true);
+    ProblemDescriptor problemDescriptor = createProblemDescriptor(element, textRange, fixes, true);
     holder.registerProblem(problemDescriptor);
   }
 
@@ -288,7 +312,7 @@ public final class GrazieSpellCheckingInspection extends SpellCheckingInspection
       return SpellCheckerManager.getInstance(project).getSuggestions(word)
         .stream()
         .filter(suggestion -> RenameUtil.isValidName(project, myElement, suggestion))
-        .noneMatch(suggestion -> Diacritics.equalsIgnoringDiacritics(word, suggestion));
+        .noneMatch(suggestion -> AsciiRanker.equalsIgnoringDiacritics(word, suggestion));
     }
 
     private static boolean isOnlyEnglishDictionaryEnabled(Project project) {
@@ -325,6 +349,19 @@ public final class GrazieSpellCheckingInspection extends SpellCheckingInspection
       return false;
     }
 
+    if (DumbService.isDumb(file.getProject())) {
+      for (int occurrence : occurrences) {
+        PsiElement element = file.findElementAt(occurrence);
+        if (element != null) {
+          SpellcheckingStrategy strategy = getSpellcheckingStrategy(element);
+          if (strategy != null && !strategy.elementFitsScope(element, Set.of(SpellCheckingScope.Comments))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
     for (int occurrence : occurrences) {
       PsiReference reference = file.findReferenceAt(occurrence);
       PsiElement resolvedReference = reference != null ? reference.resolve() : null;
@@ -345,10 +382,6 @@ public final class GrazieSpellCheckingInspection extends SpellCheckingInspection
     PsiFile file = psi.getContainingFile();
     int textStart = psi.getTextRange().getStartOffset();
     return file.getViewProvider().getContents().subSequence(0, textStart).chars().noneMatch(Character::isLetterOrDigit);
-  }
-
-  private static void registerProblem(@NotNull SpellingTypo typo, @NotNull ProblemsHolder holder) {
-    registerProblem(holder, typo.getElement(), typo.getRange(), false, typo.getWord());
   }
 
   private static void registerProblem(@NotNull ProblemsHolder holder,

@@ -26,10 +26,13 @@ jvm_library(
     "//platform/platform-api:ide",
     "//platform/platform-impl:ide-impl",
     "//python:python-community-impl",
+    "//python/python-sdk:sdk",
     "//platform/util/concurrency",
     "//platform/core-ui",
     "//platform/platform-impl/codeinsight-inline:ide-codeinsight-inline",
     "@lib//:python-ml-features-jetbrains-ml-models-python-imports-ranking-model",
+    "@lib//:jetbrains-mlapi-catboost",
+    "@lib//:jetbrains-mlapi-catboost-shadow-need-slf4j",
   ]
 )
 ### auto-generated section `build intellij.python.ml.features` end

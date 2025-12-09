@@ -12,6 +12,8 @@ import com.intellij.ui.popup.list.GroupedItemsListRenderer
 import com.intellij.xdebugger.XDebuggerBundle
 import com.intellij.xdebugger.frame.XExecutionStack
 import com.intellij.xdebugger.frame.XExecutionStack.AdditionalDisplayInfo
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugManagerProxy.Companion.getInstance
+import com.intellij.xdebugger.impl.ui.SplitDebuggerUIUtil
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.Component
@@ -41,8 +43,8 @@ class XDebuggerThreadsList(
   companion object {
     val THREADS_LIST: DataKey<XDebuggerThreadsList> = DataKey.create("THREADS_LIST")
 
-    fun createDefault(withDescription: Boolean): XDebuggerThreadsList {
-      val renderer = if (withDescription) XDebuggerGroupedFrameListRendererWithDescription() else XDebuggerGroupedFrameListRenderer()
+    fun createDefault(): XDebuggerThreadsList {
+      val renderer = XDebuggerGroupedFrameListRenderer()
       val list = XDebuggerThreadsList(renderer)
       list.doInit()
       return list
@@ -61,8 +63,17 @@ class XDebuggerThreadsList(
   override fun uiDataSnapshot(sink: DataSink) {
     sink[THREADS_LIST] = this
     stackUnderMouse?.stack?.let {
-      sink[XExecutionStack.SELECTED_STACKS] = listOf(it)
+      setSelectedStacks(sink, it)
     }
+  }
+
+  private fun setSelectedStacks(sink: DataSink, selection: XExecutionStack) {
+    val xDebugManagerProxy = getInstance()
+    val xExecutionStackId = xDebugManagerProxy.getXExecutionStackId(selection)
+    if (xExecutionStackId != null) {
+      sink[SplitDebuggerUIUtil.SPLIT_SELECTED_STACKS_KEY] = listOf(xExecutionStackId)
+    }
+    sink[XExecutionStack.SELECTED_STACKS] = listOf(selection)
   }
 
   private fun doInit() {
@@ -137,14 +148,6 @@ class XDebuggerThreadsList(
     override fun createItemComponent(): JComponent {
       createLabel()
       return XDebuggerThreadsListRenderer()
-    }
-  }
-
-  private class XDebuggerGroupedFrameListRendererWithDescription : XDebuggerGroupedFrameListRenderer() {
-
-    override fun createItemComponent(): JComponent {
-      createLabel()
-      return XDebuggerThreadsListRendererWithDescription()
     }
   }
 

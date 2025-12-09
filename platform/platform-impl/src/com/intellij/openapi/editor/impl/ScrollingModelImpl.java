@@ -1,11 +1,10 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.concurrency.ContextAwareRunnable;
 import com.intellij.ide.RemoteDesktopService;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
@@ -15,6 +14,7 @@ import com.intellij.openapi.editor.event.VisibleAreaEvent;
 import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.ScrollingModelEx;
+import com.intellij.openapi.editor.ex.util.EditorScrollingPositionKeeper;
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
@@ -39,6 +39,9 @@ import java.util.List;
 
 //@ApiStatus.Internal
 public final class ScrollingModelImpl implements ScrollingModelEx {
+  /**
+   * See also {@link EditorScrollingPositionKeeper} logger
+   */
   private static final Logger LOG = Logger.getInstance(ScrollingModelImpl.class);
 
   private final @NotNull ScrollingModel.Supplier supplier;
@@ -124,7 +127,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   @RequiresEdt
   public void scrollToCaret(@NotNull ScrollType scrollType) {
     if (LOG.isTraceEnabled()) {
-      LOG.trace(new Throwable());
+      LOG.trace(new Throwable("scrollToCaret request: " + scrollType));
     }
 
     Editor editor = supplier.getEditor();
@@ -164,6 +167,10 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   @Override
   @RequiresEdt
   public void scrollTo(@NotNull LogicalPosition logicalPosition, @NotNull ScrollType scrollType) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace(new Throwable("scrollTo request: " + scrollType + " - " + logicalPosition));
+    }
+
     Editor editor = supplier.getEditor();
     AsyncEditorLoader.Companion.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
       for (ScrollRequestListener listener : scrollRequestListeners) {
@@ -256,6 +263,10 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   @Override
   public void scroll(int hOffset, int vOffset) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace(new Throwable("scroll to point: x:" + hOffset + ", y:" + vOffset));
+    }
+
     if (accumulateViewportChanges) {
       accumulatedXOffset = hOffset;
       accumulatedYOffset = vOffset;
@@ -472,7 +483,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     @DirtyUI
     @Override
     public void stateChanged(ChangeEvent event) {
-      ReadAction.run(() -> {
+      EditorThreading.run(() -> {
         Rectangle viewRect = getVisibleArea();
         VisibleAreaEvent visibleAreaEvent = new VisibleAreaEvent(supplier.getEditor(), myLastViewRect, viewRect);
         if (!viewportPositioned && viewRect.height > 0) {
@@ -496,12 +507,24 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     private final ScrollingHelper myScrollingHelper = new ScrollingHelper() {
       @Override
       public @NotNull Point calculateScrollingLocation(@NotNull Editor editor, @NotNull VisualPosition pos) {
-        return editor.visualPositionToXY(pos);
+        var prefixAdjustment = 0;
+        if (pos.column == 0 && editor instanceof EditorEx editorEx) {
+          prefixAdjustment = editorEx.getPrefixTextWidthInPixels();
+        }
+        var res = editor.visualPositionToXY(pos);
+        res.translate(-prefixAdjustment, 0);
+        return res;
       }
 
       @Override
       public @NotNull Point calculateScrollingLocation(@NotNull Editor editor, @NotNull LogicalPosition pos) {
-        return editor.logicalPositionToXY(pos);
+        var prefixAdjustment = 0;
+        if (pos.column == 0 && editor instanceof EditorEx editorEx) {
+          prefixAdjustment = editorEx.getPrefixTextWidthInPixels();
+        }
+        var res = editor.logicalPositionToXY(pos);
+        res.translate(-prefixAdjustment, 0);
+        return res;
       }
     };
 

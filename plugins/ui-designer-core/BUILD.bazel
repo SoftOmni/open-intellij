@@ -24,11 +24,13 @@ jvm_library(
     "//platform/platform-api:ide",
     "//platform/platform-impl:ide-impl",
     "//platform/lang-impl",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/platform-impl/concurrency",
     "//platform/core-ui",
     "//platform/util/jdom",
     "//platform/platform-impl/designer",
+    "//platform/core-impl",
+    "//platform/forms_rt:java-guiForms-rt",
   ]
 )
 ### auto-generated section `build intellij.uiDesigner` end

@@ -29,16 +29,16 @@ jvm_library(
   deps = [
     "@lib//:kotlin-stdlib",
     "//libraries/guava",
-    "@lib//:kotlin-reflect",
+    "//libraries/kotlin/reflect",
     "//platform/util",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//libraries/caffeine",
-    "@lib//:kryo5",
+    "//libraries/kryo5",
     "//platform/diagnostic/telemetry",
     "@lib//:opentelemetry",
     "@lib//:opentelemetry-semconv",
     "//platform/diagnostic",
-    "@lib//:kotlinx-collections-immutable",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
   ]
 )
 ### auto-generated section `build intellij.platform.workspace.storage` end

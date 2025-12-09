@@ -3,6 +3,7 @@ package org.jetbrains.kotlin.idea.navigation
 
 import com.intellij.openapi.project.Project
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.CachedValuesManager
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
@@ -39,17 +40,19 @@ import org.jetbrains.kotlin.types.Variance
 @ApiStatus.Internal
 open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclarationNavigationPolicy {
     override fun getNavigationElement(declaration: KtDeclaration): KtElement {
-        val ktFile = declaration.containingKtFile
-        if (!ktFile.isCompiled) return declaration
-        val project = ktFile.project
-        return when (val module = ktFile.getKaModule(project, useSiteModule = null) ) {
-            is KaLibraryModule -> getCorrespondingDeclarationInLibrarySourceOrBinaryCounterpart(
-                module.librarySources ?: return declaration,
-                declaration,
-                module
-            )
+        return CachedValuesManager.getProjectPsiDependentCache(declaration) { declaration ->
+            val ktFile = declaration.containingKtFile
+            if (!ktFile.isCompiled) return@getProjectPsiDependentCache declaration
+            val project = ktFile.project
+            when (val module = ktFile.getKaModule(project, useSiteModule = null) ) {
+                is KaLibraryModule -> getCorrespondingDeclarationInLibrarySourceOrBinaryCounterpart(
+                    module.librarySources ?: return@getProjectPsiDependentCache declaration,
+                    declaration,
+                    module
+                )
 
-            else -> declaration
+                else -> declaration
+            }
         }
     }
 
@@ -294,6 +297,7 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
         crossinline matchesByPsi: (C, C) -> Boolean
     ): C? {
         val filteredCandidates = candidates.filterIsInstance<C>().filter { matchesByPsi(original, it) }
+        filteredCandidates.singleOrNull()?.let { return it }
 
         return filteredCandidates.firstOrNull { compareCallableTypesByResolve(original, it) }
             ?: filteredCandidates.firstOrNull()

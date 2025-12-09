@@ -32,9 +32,14 @@ jvm_library(
     "//platform/backend/observation",
     "//platform/backend/workspace",
     "//platform/workspace/storage",
-    "@lib//:bouncy-castle-provider",
+    "//libraries/bouncy-castle-provider",
     "//platform/testFramework/eelJava",
     "//platform/eel-provider",
+    "//platform/util/progress",
+    "//xml/xml-analysis-api:analysis",
+    "//xml/xml-analysis-impl:analysis-impl",
+    "//platform/execution",
+    "//java/testFramework/backend",
   ]
 )
 ### auto-generated section `build intellij.maven.testFramework` end

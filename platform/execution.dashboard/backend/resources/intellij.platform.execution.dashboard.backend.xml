@@ -1,4 +1,4 @@
-<idea-plugin>
+<idea-plugin visibility="internal">
   <dependencies>
     <module name="intellij.platform.backend"/>
     <module name="intellij.platform.kernel.backend"/>
@@ -25,4 +25,9 @@
                        key="notification.group.services"
                        notificationIds="run.dashboard.multiple.run.configurations"/>
   </extensions>
+
+  <projectListeners>
+    <listener class="com.intellij.platform.execution.dashboard.backend.RunDashboardConfigurationsListener"
+              topic="com.intellij.execution.RunManagerListener"/>
+  </projectListeners>
 </idea-plugin>

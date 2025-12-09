@@ -134,6 +134,11 @@
     <openapi.vcs.history.actions.ShowDiffBeforeWithLocalAction.ExtensionProvider
       implementation="com.intellij.openapi.vcs.changes.savedPatches.CompareBeforeWithLocalForSavedPatchesAction"/>
 
+    <vcs.commitMessageInspection implementation="com.intellij.vcs.commit.message.SubjectBodySeparationInspection"/>
+    <vcs.commitMessageInspection implementation="com.intellij.vcs.commit.message.SubjectLimitInspection"/>
+    <vcs.commitMessageInspection implementation="com.intellij.vcs.commit.message.BodyLimitInspection"/>
+    <vcs.commitMessageInspection implementation="com.intellij.vcs.commit.message.CommitMessageSpellCheckingInspection"/>
+
     <referenceProviderType key="commentsReferenceProvider"
                            implementationClass="com.intellij.psi.impl.source.resolve.reference.ArbitraryPlaceUrlReferenceProvider"/>
     <psi.symbolReferenceProvider hostLanguage=""
@@ -147,6 +152,10 @@
                                  referenceClass="com.intellij.openapi.paths.UrlReference"
                                  targetClass="com.intellij.openapi.paths.UrlSymbol"
                                  implementationClass="com.intellij.psi.impl.source.resolve.reference.LiteralUrlReferenceProvider"/>
+    <polySymbols.psiReferenceProvider hostElementClass="com.intellij.psi.PsiPlainTextFile"
+                                      hostLanguage="TEXT"
+                                      implementationClass="com.intellij.psi.impl.source.resolve.reference.CommitMessageReferenceProvider"/>
+    <polySymbols.enableInLanguage language="TEXT"/>
 
     <selectInTarget implementation="com.intellij.openapi.vcs.changes.SelectInChangesViewTarget"/>
 
@@ -189,7 +198,6 @@
                         className="com.intellij.openapi.vcs.changes.ChangesViewManager$ContentProvider"
                         preloaderClassName="com.intellij.openapi.vcs.changes.ChangesViewManager$ContentPreloader"
                         predicateClassName="com.intellij.openapi.vcs.changes.ChangesViewManager$ContentPredicate"
-                        displayNameSupplierClassName="com.intellij.openapi.vcs.changes.ChangesViewManager$DisplayNameSupplier"
                         isInCommitToolWindow="true"/>
     <changesViewContent tabName="Shelf"
                         className="com.intellij.openapi.vcs.changes.shelf.ShelvedChangesViewManager$ContentProvider"
@@ -203,8 +211,6 @@
     <editorTabTitleProvider implementation="com.intellij.openapi.vcs.vfs.VcsFileEditorTabTitleProvider"/>
 
     <customizableActionGroupProvider implementation="com.intellij.openapi.vcs.ui.VcsCustomizableActionGroupProvider"/>
-
-    <vcs.changes.changesViewModifier implementation="com.intellij.vcs.commit.EditedCommitChangesViewModifier"/>
 
     <vcs.changes.changesViewConflictsBannerCustomizer implementation="com.intellij.openapi.vcs.merge.DefaultChangesViewConflictsBannerCustomizer"/>
 
@@ -240,7 +246,6 @@
     <fileDocumentSynchronizationVetoer implementation="com.intellij.vcs.commit.SaveCommittingDocumentsVetoer"/>
     <fileDocumentManagerListener implementation="com.intellij.vcs.commit.SaveCommittingDocumentsVetoer"/>
 
-    <applicationService serviceImplementation="com.intellij.openapi.vcs.VcsApplicationSettings"/>
     <applicationService serviceInterface="com.intellij.openapi.vcs.impl.CheckinHandlersManager"
                         serviceImplementation="com.intellij.openapi.vcs.impl.CheckinHandlersManagerImpl"/>
     <pathMacroFilter implementation="com.intellij.openapi.vcs.VcsPathMacroFilter"/>
@@ -340,6 +345,7 @@
     <advancedSetting id="vcs.non.modal.commit.toggle.ui" default="false" bundle="messages.VcsBundle" groupKey="advanced.settings.vcs"/>
     <advancedSetting id="vcs.non.modal.commit.close.in.windowed.mode" bundle="messages.VcsBundle" groupKey="advanced.settings.vcs" default="true"/>
     <advancedSetting id="vcs.push.all.with.commits" default="false" bundle="messages.VcsBundle" groupKey="advanced.settings.vcs"/>
+    <advancedSetting id="vcs.allow.force.push.without.confirmation" default="false" bundle="messages.VcsBundle" groupKey="advanced.settings.vcs"/>
 
     <notificationGroup id="External Executable Critical Failures" displayType="STICKY_BALLOON" bundle="messages.VcsBundle" key="notification.group.external.executable"/>
 

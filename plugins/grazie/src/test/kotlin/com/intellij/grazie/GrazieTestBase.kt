@@ -11,12 +11,8 @@ import com.intellij.grazie.remote.HunspellDescriptor
 import com.intellij.grazie.spellcheck.GrazieCheckers
 import com.intellij.grazie.spellcheck.GrazieSpellCheckingInspection
 import com.intellij.grazie.text.TextChecker
-import com.intellij.grazie.text.TextContent
-import com.intellij.grazie.text.TextExtractor
-import com.intellij.grazie.text.TextProblem
 import com.intellij.grazie.utils.TextStyleDomain
 import com.intellij.grazie.utils.TextStyleDomain.*
-import com.intellij.grazie.utils.filterFor
 import com.intellij.lang.Language
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.PathManager
@@ -24,15 +20,11 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
-import com.intellij.openapi.util.registry.Registry
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiPlainText
 import com.intellij.spellchecker.SpellCheckerManager.Companion.getInstance
 import com.intellij.testFramework.ExtensionTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.io.ZipUtil
-import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.io.path.Path
 
@@ -101,14 +93,11 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
 
   protected open val additionalEnabledContextLanguages: Set<Language> = emptySet()
 
-  protected open val enableGrazieChecker: Boolean = false
-
   override fun getBasePath() = "community/plugins/grazie/src/test/testData"
 
   override fun setUp() {
     super.setUp()
     maskSaxParserFactory(testRootDisposable)
-    if (enableGrazieChecker) Registry.get("spellchecker.grazie.enabled").setValue(true, testRootDisposable)
     myFixture.enableInspections(*inspectionTools)
 
     enableProofreadingFor(enabledLanguages)
@@ -169,21 +158,5 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
   protected open fun runHighlightTestForFile(file: String) {
     myFixture.configureByFile(file)
     myFixture.checkHighlighting(true, false, false)
-  }
-
-  fun plain(vararg texts: String) = plain(texts.toList())
-
-  fun plain(texts: List<String>): Collection<PsiElement> {
-    return texts.flatMap { myFixture.configureByText("${it.hashCode()}.txt", it).filterFor<PsiPlainText>() }
-  }
-
-  fun check(tokens: Collection<PsiElement>): List<TextProblem> {
-    return tokens.flatMap {
-      TextExtractor.findTextsAt(it, TextContent.TextDomain.ALL).flatMap { text ->
-        runBlocking {
-          LanguageToolChecker().checkExternally(text)
-        }
-      }
-    }
   }
 }

@@ -6,19 +6,15 @@ import com.intellij.psi.util.findTopmostParentOfType
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.allOverriddenSymbols
-import org.jetbrains.kotlin.analysis.api.components.declaredMemberScope
-import org.jetbrains.kotlin.analysis.api.components.memberScope
-import org.jetbrains.kotlin.analysis.api.components.resolveToCall
-import org.jetbrains.kotlin.analysis.api.components.semanticallyEquals
-import org.jetbrains.kotlin.analysis.api.components.withNullability
+import org.jetbrains.kotlin.analysis.api.components.*
 import org.jetbrains.kotlin.analysis.api.resolution.KaSimpleFunctionCall
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.*
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.idea.base.psi.copied
-import org.jetbrains.kotlin.idea.base.psi.getSamConstructorValueArgument
+import org.jetbrains.kotlin.idea.base.psi.samConstructorValueArgument
+import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
@@ -44,6 +40,12 @@ val KaCallableSymbol.allOverriddenSymbolsWithSelf: Sequence<KaCallableSymbol>
             yieldAll(originalSymbol.allOverriddenSymbols)
         }
     }
+
+context(_: KaSession)
+@ApiStatus.Internal
+fun KaCallableSymbol.hasOrOverridesCallableId(callableId: CallableId): Boolean {
+    return allOverriddenSymbolsWithSelf.any { it.callableId == callableId }
+}
 
 context(_: KaSession)
 fun KaNamedClassSymbol.findSamSymbolOrNull(useDeclaredMemberScope: Boolean = true): KaNamedFunctionSymbol? {
@@ -187,13 +189,13 @@ fun samConstructorCallsToBeConverted(functionCall: KtCallExpression): Collection
 }
 
 private fun canBeSamConstructorCall(argument: KtValueArgument): Boolean =
-    argument.toCallExpression()?.getSamConstructorValueArgument() != null
+    argument.toCallExpression()?.samConstructorValueArgument != null
 
 private fun ValueArgument.toCallExpression(): KtCallExpression? =
     getArgumentExpression()?.getPossiblyQualifiedCallExpression()
 
 private fun containsLabeledReturnPreventingConversion(it: KtCallExpression): Boolean {
-    val samValueArgument = it.getSamConstructorValueArgument()
+    val samValueArgument = it.samConstructorValueArgument
     val samConstructorName = (it.calleeExpression as? KtSimpleNameExpression)?.getReferencedNameAsName()
     return samValueArgument == null ||
             samConstructorName == null ||

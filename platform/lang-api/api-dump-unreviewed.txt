@@ -454,7 +454,6 @@ c:com.intellij.codeInsight.daemon.LineMarkerInfo
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,I,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment,java.util.function.Supplier):V
-- p:<init>(com.intellij.psi.SmartPsiElementPointer,com.intellij.openapi.util.TextRange,javax.swing.Icon,java.util.function.Supplier,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - createGutterRenderer():com.intellij.openapi.editor.markup.GutterIconRenderer
 - getEditorFilter():com.intellij.openapi.editor.markup.MarkupEditorFilter
 - getElement():com.intellij.psi.PsiElement
@@ -1519,10 +1518,6 @@ c:com.intellij.execution.services.SimpleServiceViewDescriptor
 - <init>(java.lang.String,javax.swing.Icon,java.lang.String):V
 - getId():java.lang.String
 - getPresentation():com.intellij.navigation.ItemPresentation
-com.intellij.execution.target.CustomToolLanguageConfigurable
-- a:createCustomTool():java.lang.Object
-- a:setIntrospectable(com.intellij.execution.target.LanguageRuntimeType$Introspectable):V
-- a:validate():java.util.Collection
 f:com.intellij.execution.testframework.TestIconMapper
 - com.intellij.execution.testframework.PoolOfTestIcons
 - <init>():V

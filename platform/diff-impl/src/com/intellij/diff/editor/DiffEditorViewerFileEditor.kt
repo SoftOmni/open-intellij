@@ -20,11 +20,17 @@ import javax.swing.JComponent
 
 @Suppress("LeakingThis")
 open class DiffEditorViewerFileEditor(
+  val project: Project?,
   file: VirtualFile,
   val editorViewer: DiffEditorViewer,
 ) : DiffFileEditorBase(file,
                        editorViewer.component,
-                       editorViewer.disposable), FileEditorWithTextEditors {
+                       editorViewer.disposable
+), FileEditorWithTextEditors {
+
+  @Deprecated("Use the primary constructor with a 'project' parameter")
+  constructor(file: VirtualFile, editorViewer: DiffEditorViewer) : this(null, file, editorViewer)
+
   private val settings by lazy { DiffSettingsHolder.DiffSettings.getSettings() }
 
   init {
@@ -61,7 +67,7 @@ open class DiffEditorViewerFileEditor(
   override fun getPreferredFocusedComponent(): JComponent? = editorViewer.preferredFocusedComponent
 
   override fun selectNotify() {
-    editorViewer.fireProcessorActivated()
+    editorSelectNotify(project, editorViewer, this)
   }
 
   override fun getFilesToRefresh(): List<VirtualFile> = editorViewer.filesToRefresh

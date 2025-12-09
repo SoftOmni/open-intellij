@@ -70,13 +70,13 @@ abstract class BannerStartPagePromoter : StartPagePromoter {
         else -> 0
       }))
       it.foreground = UIUtil.getContextHelpForeground()
-      // todo workaround IJPL-62164 Implement minSize in GridLayout
-      it.preferredSize = Dimension(100, 0)
     }
     val button = createButton()
     button.accessibleContext.accessibleDescription = "$headerLabel. $description"
 
-    val vPanel = JPanel(GridLayout()).apply {
+    val layout = GridLayout()
+    layout.respectMinimumSize = true
+    val vPanel = JPanel(layout).apply {
       isOpaque = false
       alignmentY = Component.TOP_ALIGNMENT
     }
@@ -88,7 +88,13 @@ abstract class BannerStartPagePromoter : StartPagePromoter {
       .row()
       .cell(button, visualPaddings = button.insets.toUnscaledGaps())
 
-    hPanel.background = JBColor.namedColor("WelcomeScreen.SidePanel.background", JBColor(0xF2F2F2, 0x3C3F41))
+    hPanel.background = JBColor.namedColor(
+      "WelcomeScreen.Banner.background",
+      JBColor.namedColor(
+        "WelcomeScreen.SidePanel.background",
+        JBColor(0xF2F2F2, 0x3C3F41)
+      )
+    )
     hPanel.layout = BoxLayout(hPanel, BoxLayout.X_AXIS)
     hPanel.border = JBUI.Borders.empty(12, 16, 16, 16)
     val picture = JLabel(promoImage)

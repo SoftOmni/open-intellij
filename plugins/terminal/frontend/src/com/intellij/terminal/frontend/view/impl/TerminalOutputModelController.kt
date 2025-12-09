@@ -1,9 +1,9 @@
 package com.intellij.terminal.frontend.view.impl
 
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
-import org.jetbrains.plugins.terminal.session.TerminalContentUpdatedEvent
-import org.jetbrains.plugins.terminal.session.TerminalCursorPositionChangedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalContentUpdatedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalCursorPositionChangedEvent
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModel
 
 /**
  * A controller for the output model updates.
@@ -11,7 +11,7 @@ import org.jetbrains.plugins.terminal.session.TerminalCursorPositionChangedEvent
  * Note that it is not guaranteed that the model will be updated immediately, it is up to the implementation.
  */
 internal interface TerminalOutputModelController {
-  val model: TerminalOutputModel
+  val model: MutableTerminalOutputModel
 
   @RequiresEdt
   fun updateContent(event: TerminalContentUpdatedEvent)

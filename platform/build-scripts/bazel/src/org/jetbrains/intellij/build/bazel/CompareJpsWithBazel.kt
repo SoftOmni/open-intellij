@@ -4,6 +4,7 @@ package org.jetbrains.intellij.build.bazel
 
 import com.intellij.util.system.CpuArch
 import com.intellij.util.system.OS
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
@@ -11,6 +12,7 @@ import org.jetbrains.intellij.build.bazel.JpsModuleToBazel.Companion.searchCommu
 import java.nio.file.Path
 import java.util.zip.ZipFile
 import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.PathWalkOption
 import kotlin.io.path.exists
 import kotlin.io.path.inputStream
 import kotlin.io.path.invariantSeparatorsPathString
@@ -38,7 +40,7 @@ internal class CompareJpsWithBazel {
       val projectHome = ultimateRoot ?: communityRoot
       val modulesToOutputRoots = BazelTargetsInfo.loadModulesOutputRootsFromBazelTargetsJson(projectHome)
 
-      var allOk = true
+      val failedForModules = mutableListOf<String>()
 
       modulesToOutputRoots.forEach { (module, roots) ->
         println("verifying module '$module' ...")
@@ -49,11 +51,12 @@ internal class CompareJpsWithBazel {
         val prodOk = verifySet("production", roots.productionJars, productionDir)
         val testOk = verifySet("test", roots.testJars, testDir)
 
-        if (!prodOk || !testOk) allOk = false
+        if (!prodOk || !testOk) failedForModules.add(module)
       }
 
-      if (!allOk) {
+      if (failedForModules.isNotEmpty()) {
         println("FAIL")
+        println("failedForModules .count ${failedForModules.count()}: ${failedForModules.sorted().joinToString(", ")}")
         exitProcess(1)
       }
 
@@ -93,10 +96,10 @@ internal class CompareJpsWithBazel {
       jars.forEach { jar ->
         ZipFile(jar.toFile()).use { zip ->
           zip.entries().asSequence()
-            .filterNot { it.isDirectory }
             .filterNot { isKnownFileToExclude(it.name) }
             .forEach { e ->
-              result[e.name] = zip.getInputStream(e).readAllBytes()
+              val previous = result.put(e.name, if (e.isDirectory) ByteArray(0) else zip.getInputStream(e).readAllBytes())
+              require(previous == null) { "duplicate ${e.name}" }
             }
         }
       }
@@ -105,16 +108,20 @@ internal class CompareJpsWithBazel {
 
     @OptIn(ExperimentalPathApi::class)
     private fun readFromDirectory(root: Path): Map<String, ByteArray> =
-      root.walk()
-        .filterNot { it.isDirectory() }
+      root.walk(PathWalkOption.INCLUDE_DIRECTORIES)
+        .filterNot { it == root }
         .filterNot { isKnownFileToExclude(root.relativize(it).invariantSeparatorsPathString) }
         .associate { path ->
-          root.relativize(path).invariantSeparatorsPathString to path.readBytes()
+          if (path.isDirectory()) {
+            root.relativize(path).invariantSeparatorsPathString + "/" to ByteArray(0)
+          }
+          else {
+            root.relativize(path).invariantSeparatorsPathString to path.readBytes()
+          }
         }
 
     private fun isKnownFileToExclude(path: String): Boolean = when {
-      path.startsWith("META-INF") && path.endsWith(".kotlin_module") -> true
-      path.startsWith("META-INF/com.jetbrains.rhizomedb.impl.EntityTypeProvider.") -> true  // https://youtrack.jetbrains.com/issue/FL-34023
+      //path == "__index__" -> true  // for local JPS compilation
       else -> false
     }
   }
@@ -123,6 +130,7 @@ internal class CompareJpsWithBazel {
 
   private class BazelTargetsInfo {
     companion object {
+      @OptIn(ExperimentalSerializationApi::class)
       fun loadModulesOutputRootsFromBazelTargetsJson(projectRoot: Path): Map<String, ModuleOutputRoots> {
         val bazelTargetsJsonFile = projectRoot.resolve("build").resolve("bazel-targets.json")
         val targetsFile = bazelTargetsJsonFile.inputStream().use { Json.decodeFromStream<TargetsFile>(it) }

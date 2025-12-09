@@ -225,6 +225,9 @@ com.intellij.collaboration.auth.CredentialsRepository
 com.intellij.collaboration.auth.DefaultAccountHolder
 - a:getAccount():com.intellij.collaboration.auth.Account
 - a:setAccount(com.intellij.collaboration.auth.Account):V
+com.intellij.collaboration.auth.ObservableAccountsRepository
+- com.intellij.collaboration.auth.AccountsRepository
+- a:getAccountsFlow():kotlinx.coroutines.flow.StateFlow
 f:com.intellij.collaboration.auth.PasswordSafeCredentialsRepository
 - com.intellij.collaboration.auth.CredentialsRepository
 - <init>(java.lang.String,com.intellij.collaboration.auth.PasswordSafeCredentialsRepository$CredentialsMapper):V
@@ -447,6 +450,7 @@ f:com.intellij.collaboration.util.ComputedResult
 f:com.intellij.collaboration.util.ComputedResult$Companion
 - f:compute-Jugeb-E(kotlin.jvm.functions.Function0):com.intellij.collaboration.util.ComputedResult
 - f:failure-NCBHHgM(java.lang.Throwable):kotlin.Result
+- f:fromResult-vAKnILo(java.lang.Object):kotlin.Result
 - f:loading-uUe189E():kotlin.Result
 - f:success-NCBHHgM(java.lang.Object):kotlin.Result
 f:com.intellij.collaboration.util.ComputedResultKt

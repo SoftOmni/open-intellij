@@ -3,6 +3,8 @@ package com.intellij.xdebugger.impl.ui;
 
 import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.codeWithMe.ClientId;
+import com.intellij.frontend.FrontendApplicationInfo;
+import com.intellij.frontend.FrontendType;
 import com.intellij.ide.nls.NlsMessages;
 import com.intellij.ide.ui.AntiFlickeringPanel;
 import com.intellij.openapi.Disposable;
@@ -13,6 +15,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.WriteIntentReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.ClientEditorManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
@@ -30,6 +33,8 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.platform.debugger.impl.shared.proxy.XBreakpointManagerProxy;
+import com.intellij.platform.debugger.impl.shared.proxy.XBreakpointProxy;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiManager;
 import com.intellij.testFramework.LightVirtualFile;
@@ -49,12 +54,10 @@ import com.intellij.xdebugger.frame.XValue;
 import com.intellij.xdebugger.frame.XValueModifier;
 import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerProxy;
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointProxy;
 import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointsDialogFactory;
 import com.intellij.xdebugger.impl.breakpoints.ui.XLightBreakpointPropertiesPanel;
-import com.intellij.xdebugger.impl.frame.XDebugManagerProxy;
-import com.intellij.xdebugger.impl.frame.XDebugSessionProxy;
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugManagerProxy;
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy;
 import com.intellij.xdebugger.impl.frame.XWatchesView;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTree;
 import com.intellij.xdebugger.impl.ui.tree.XDebuggerTreeState;
@@ -71,10 +74,12 @@ import java.awt.*;
 import java.awt.event.*;
 
 import static com.intellij.openapi.wm.IdeFocusManager.getGlobalInstance;
-import static com.intellij.xdebugger.impl.breakpoints.XBreakpointProxyKt.asProxy;
+import static com.intellij.xdebugger.impl.proxy.MonolithBreakpointProxyKt.asProxy;
 
 public final class DebuggerUIUtil {
   public static final @NonNls String FULL_VALUE_POPUP_DIMENSION_KEY = "XDebugger.FullValuePopup";
+
+  private final static Logger LOG = Logger.getInstance(DebuggerUIUtil.class);
 
   private DebuggerUIUtil() {
   }
@@ -153,7 +158,7 @@ public final class DebuggerUIUtil {
                                     @NotNull MouseEvent event,
                                     @NotNull Project project,
                                     @Nullable Editor editor) {
-    WriteIntentReadAction.run((Runnable)() -> VisualizedTextPopupUtil.evaluateAndShowValuePopup(evaluator, event, project, editor));
+    WriteIntentReadAction.run(() -> VisualizedTextPopupUtil.evaluateAndShowValuePopup(evaluator, event, project, editor));
   }
 
   /**
@@ -453,7 +458,7 @@ public final class DebuggerUIUtil {
     if (view == null && project != null) {
       XDebugSessionProxy proxy = getSessionProxy(e);
       if (proxy != null) {
-        XDebugSessionTab tab = proxy.getSessionTab();
+        XDebugSessionTab tab = (XDebugSessionTab)proxy.getSessionTab();
         if (tab != null) {
           return tab.getWatchesView();
         }
@@ -547,8 +552,11 @@ public final class DebuggerUIUtil {
   /**
    * Use {@link DebuggerUIUtil#getSessionProxy(AnActionEvent)} instead.
    */
-  @ApiStatus.Obsolete
   public static @Nullable XDebugSession getSession(@NotNull AnActionEvent e) {
+    if (SplitDebuggerMode.showSplitWarnings() && FrontendApplicationInfo.INSTANCE.getFrontendType() instanceof FrontendType.Remote) {
+      LOG.error("[Split debugger] In Split mode DebuggerUIUtil#getSession(AnActionEvent) should not be called from the frontend. " +
+                "Please use DebuggerUIUtil#getSessionProxy(AnActionEvent) instead.");
+    }
     XDebugSession session = e.getData(XDebugSession.DATA_KEY);
     if (session == null) {
       Project project = e.getProject();

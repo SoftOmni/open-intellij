@@ -4,6 +4,7 @@ package com.intellij.xdebugger.impl.ui
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy
 import com.intellij.ui.content.custom.options.PersistentContentCustomLayoutOption
 import com.intellij.ui.content.custom.options.PersistentContentCustomLayoutOptions
 import com.intellij.xdebugger.XDebuggerBundle
@@ -45,7 +46,7 @@ internal class ThreadsTreeLayoutOption(
 abstract class SideBySideLayoutOptionBase(private val options: XDebugTabLayoutSettings.XDebugFramesAndThreadsLayoutOptions,
                                           private val areThreadsVisible: Boolean) : FramesAndThreadsLayoutOptionBase(options) {
 
-  override fun createView(sessionProxy: XDebugSessionProxy): XThreadsFramesView = XThreadsFramesView(options.debugTab).apply {
+  override fun createView(sessionProxy: XDebugSessionProxy): XThreadsFramesView = XThreadsFramesView(options.debugTab, sessionProxy).apply {
     this.setThreadsVisible(areThreadsVisible)
   }
 }

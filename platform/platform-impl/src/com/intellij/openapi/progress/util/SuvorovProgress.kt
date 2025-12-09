@@ -10,8 +10,12 @@ import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadWriteActionSupport
 import com.intellij.openapi.application.impl.InternalThreading
+import com.intellij.openapi.application.rw.PlatformReadWriteActionSupport
 import com.intellij.openapi.application.useDebouncedDrawingInSuvorovProgress
+import com.intellij.openapi.components.serviceIfCreated
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.util.ui.NiceOverlayUi
 import com.intellij.openapi.util.Disposer
@@ -22,14 +26,13 @@ import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.application
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.GraphicsUtil
-import com.jetbrains.rd.util.error
-import com.jetbrains.rd.util.getLogger
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.future.asCompletableFuture
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.AWTEvent
+import java.awt.Component
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
@@ -63,6 +66,8 @@ import javax.swing.SwingUtilities
 @ApiStatus.Internal
 object SuvorovProgress {
 
+  private val awtComponentLock = (object : Component() {}).treeLock
+
   @Volatile
   private lateinit var eternalStealer: EternalEventStealer
 
@@ -82,9 +87,36 @@ object SuvorovProgress {
     }
   }
 
+  /**
+   * We have a major conceptual problem -- many rendering computations are executing under [Component.treeLock],
+   * where they access PSI and consequently they acquire read action.
+   * At the same time, some computations inside read actions initialize Swing components which internally also acquire [Component.treeLock]
+   *
+   * This results in a deadlock caused by the incorrect order of locks.
+   * This is particularly actual with the background write action which can stall of read actions.
+   *
+   * Too many clients already rely on this behavior, so we solve the problem for this particular pair of locks:
+   * when we detect such situation, we forcefully retry the pending background write action -- after release of pending WA,
+   * some read actions can progress, including the one on EDT.
+   *
+   * See IJPL-211485
+   */
+  fun tryProgressWithPendingBackgroundWriteAction() {
+    if (Thread.holdsLock(awtComponentLock)) {
+      val application = ApplicationManager.getApplication()
+      val rwService = application.serviceIfCreated<ReadWriteActionSupport>()
+      if (rwService is PlatformReadWriteActionSupport) {
+        rwService.signalWriteActionNeedsToBeRetried()
+      }
+    }
+  }
+
   @JvmStatic
   fun dispatchEventsUntilComputationCompletes(awaitedValue: Deferred<*>) {
     val showingDelay = Registry.get("ide.suvorov.progress.showing.delay.ms").asInteger()
+
+    tryProgressWithPendingBackgroundWriteAction()
+
     processInvocationEventsWithoutDialog(awaitedValue, showingDelay)
 
     if (awaitedValue.isCompleted) {
@@ -112,16 +144,15 @@ object SuvorovProgress {
         processInvocationEventsWithoutDialog(awaitedValue, Int.MAX_VALUE)
       }
       "NiceOverlay" -> {
-        if (title.get() != null) {
-          showPotemkinProgress(awaitedValue, true)
-        }
         val currentFocusedPane = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow?.let(SwingUtilities::getRootPane)
         // IJPL-203107 in remote development, there is no graphics for a component
         if (currentFocusedPane == null || GraphicsUtil.safelyGetGraphics(currentFocusedPane) == null) {
           // can happen also in tests
           processInvocationEventsWithoutDialog(awaitedValue, Int.MAX_VALUE)
         }
-        else {
+        else if (title.get() != null) {
+          showPotemkinProgress(awaitedValue, true)
+        } else {
           showNiceOverlay(awaitedValue, currentFocusedPane)
         }
       }
@@ -160,7 +191,7 @@ object SuvorovProgress {
               RevealFileAction.openFile(dumpFile)
             }
             else {
-              getLogger<SuvorovProgress>().error { "Failed to dump threads to $dumpFile" }
+              logger<SuvorovProgress>().error("Failed to dump threads to $dumpFile")
             }
           }
         })

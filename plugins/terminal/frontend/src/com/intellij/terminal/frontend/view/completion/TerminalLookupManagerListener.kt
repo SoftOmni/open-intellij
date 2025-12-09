@@ -1,6 +1,8 @@
 package com.intellij.terminal.frontend.view.completion
 
 import com.google.common.base.Ascii
+import com.intellij.codeInsight.completion.CompletionProcessEx
+import com.intellij.codeInsight.completion.CompletionService
 import com.intellij.codeInsight.lookup.*
 import com.intellij.codeInsight.lookup.impl.EmptyLookupItem
 import com.intellij.codeInsight.lookup.impl.LookupImpl
@@ -9,16 +11,17 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.openapi.util.TextRange
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.terminal.TerminalUiSettingsManager
 import com.intellij.terminal.frontend.view.impl.TerminalInput
 import kotlinx.coroutines.cancel
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModelListener
+import org.jetbrains.plugins.terminal.block.reworked.TerminalCommandCompletion
 import org.jetbrains.plugins.terminal.block.reworked.TerminalUsageLocalStorage
 import org.jetbrains.plugins.terminal.block.util.TerminalDataContextUtils.isOutputModelEditor
 import org.jetbrains.plugins.terminal.util.terminalProjectScope
+import org.jetbrains.plugins.terminal.view.TerminalContentChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.TerminalOutputModelListener
 import kotlin.math.max
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
@@ -111,6 +114,25 @@ private class TerminalLookupListener : LookupListener {
   override fun firstElementShown() {
     TerminalUsageLocalStorage.getInstance().recordCompletionPopupShown()
   }
+
+  /**
+   * Adds [TerminalCommandCompletion.COMPLETING_COMMAND_KEY] to the lookup once it is shown.
+   */
+  override fun lookupShown(event: LookupEvent) {
+    val process = CompletionService.getCompletionService().currentCompletion as? CompletionProcessEx ?: return
+    val command = process.getUserData(TerminalCommandCompletion.COMPLETING_COMMAND_KEY) ?: return
+    val lookup = event.lookup as? LookupImpl ?: return
+    lookup.putUserData(TerminalCommandCompletion.COMPLETING_COMMAND_KEY, command)
+  }
+
+  /**
+   * Stores the last selected item in the lookup by [TerminalCommandCompletion.LAST_SELECTED_ITEM_KEY].
+   */
+  override fun currentItemChanged(event: LookupEvent) {
+    val lookup = event.lookup as? LookupImpl ?: return
+    val item = event.item ?: return
+    lookup.putUserData(TerminalCommandCompletion.LAST_SELECTED_ITEM_KEY, item)
+  }
 }
 
 /**
@@ -177,18 +199,17 @@ private class TerminalLookupOutputModelListener(
 ) : TerminalOutputModelListener {
   private val initialTextBelowCursor = model.getTextBelowCursorLine().trim()
 
-  override fun afterContentChanged(model: TerminalOutputModel, startOffset: Int, isTypeAhead: Boolean) {
-    val textBelowCursor = model.getTextBelowCursorLine().trim()
+  override fun afterContentChanged(event: TerminalContentChangeEvent) {
+    val textBelowCursor = event.model.getTextBelowCursorLine().trim()
     if (textBelowCursor != initialTextBelowCursor) {
-      lookup.hideLookup(true)
+      lookup.hideLookup(false)
     }
   }
 
-  private fun TerminalOutputModel.getTextBelowCursorLine(): String {
-    val cursorOffset = cursorOffsetState.value.toRelative()
-    val line = document.getLineNumber(cursorOffset)
-    val lineEndOffset = document.getLineEndOffset(line)
-    return document.getText(TextRange(lineEndOffset, document.textLength))
+  private fun TerminalOutputModel.getTextBelowCursorLine(): CharSequence {
+    val line = getLineByOffset(this.cursorOffset)
+    val lineEndOffset = getEndOfLine(line)
+    return getText(lineEndOffset, endOffset)
   }
 }
 
@@ -196,9 +217,8 @@ private class TerminalLookupOutputModelListener(
  * Returns `true` if we need to execute the command immediately if user select [chosenItemString] in the Lookup.
  */
 internal fun canExecuteWithChosenItem(chosenItemString: String, typedString: String): Boolean {
-  val isCaseSensitive = SystemInfo.isFileSystemCaseSensitive
-  return chosenItemString.equals(typedString, ignoreCase = !isCaseSensitive)
+  return chosenItemString.equals(typedString, ignoreCase = true)
          // If the typed string differs only by the absence of the trailing slash, execute the command as well
-         || chosenItemString.equals("$typedString/", ignoreCase = !isCaseSensitive)
-         || chosenItemString.equals("$typedString\\", ignoreCase = !isCaseSensitive)
+         || chosenItemString.equals("$typedString/", ignoreCase = true)
+         || chosenItemString.equals("$typedString\\", ignoreCase = true)
 }

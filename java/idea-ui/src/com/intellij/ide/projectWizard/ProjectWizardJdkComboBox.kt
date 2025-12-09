@@ -1,12 +1,12 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.projectWizard
 
-import com.intellij.execution.wsl.WslPath
 import com.intellij.icons.AllIcons
 import com.intellij.ide.JavaUiBundle
 import com.intellij.ide.projectWizard.ProjectWizardJdkIntent.*
 import com.intellij.ide.projectWizard.ProjectWizardJdkPredicate.Companion.getError
 import com.intellij.ide.util.PropertiesComponent
+import com.intellij.ide.util.projectWizard.WizardContext
 import com.intellij.ide.wizard.NewProjectWizardBaseData.Companion.baseData
 import com.intellij.ide.wizard.NewProjectWizardBaseStep
 import com.intellij.ide.wizard.NewProjectWizardStep
@@ -38,25 +38,25 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.SdkDownload
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.popup.ListSeparator
-import com.intellij.openapi.util.SystemInfo.isWindows
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.EelDescriptor
-import com.intellij.platform.eel.EelOsFamily
 import com.intellij.platform.eel.provider.LocalEelDescriptor
+import com.intellij.platform.eel.provider.LocalEelMachine
 import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.getResolvedEelMachine
 import com.intellij.platform.eel.provider.localEel
+import com.intellij.platform.eel.provider.toEelApi
 import com.intellij.platform.eel.provider.utils.EelPathUtils
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.pom.java.LanguageLevel
 import com.intellij.ui.*
 import com.intellij.ui.AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.dsl.builder.COLUMNS_LARGE
+import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.Cell
 import com.intellij.ui.dsl.builder.Row
-import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.layout.ValidationInfoBuilder
 import com.intellij.util.application
 import com.intellij.util.concurrency.annotations.RequiresEdt
@@ -85,37 +85,30 @@ fun NewProjectWizardStep.projectWizardJdkComboBox(
   sdkFilter: (Sdk) -> Boolean = { true },
   jdkPredicate: ProjectWizardJdkPredicate? = ProjectWizardJdkPredicate.IsJdkSupported(),
 ): Cell<ProjectWizardJdkComboBox> {
-  return projectWizardJdkComboBox(
-    row,
+  return row.projectWizardJdkComboBox(
+    context,
     requireNotNull(baseData) {
       "Expected ${NewProjectWizardBaseStep::class.java.simpleName} in the new project wizard step tree."
     }.pathProperty.toEelDescriptorProperty(),
     intentProperty,
-    context.disposable,
-    context.projectJdk,
     sdkFilter,
     jdkPredicate,
   )
-    .onApply {
-      context.projectJdk = intentProperty.get().prepareJdk()
-    }
 }
 
 /**
- * @param projectJdk Existing JDK in case we are creating a module ("Project JDK" will be selected by default)
  * @param sdkFilter Filter for registered SDKs
  * @param jdkPredicate Predicate to show an error based on the JDK intent version/name
  */
-fun projectWizardJdkComboBox(
-  row: Row,
+fun Row.projectWizardJdkComboBox(
+  context: WizardContext,
   eelDescriptorProperty: ObservableProperty<EelDescriptor>,
   intentProperty: ObservableMutableProperty<ProjectWizardJdkIntent>,
-  disposable: Disposable,
-  projectJdk: Sdk? = null,
   sdkFilter: (Sdk) -> Boolean = { true },
   jdkPredicate: ProjectWizardJdkPredicate? = ProjectWizardJdkPredicate.IsJdkSupported(),
 ): Cell<ProjectWizardJdkComboBox> {
-  val comboBox = ProjectWizardJdkComboBox(projectJdk, disposable, sdkFilter)
+  val comboBox = ProjectWizardJdkComboBox(context.projectJdk, context.disposable, sdkFilter)
+  comboBox.isUsePreferredSizeAsMinimum = false
 
   val intentValue = intentProperty.get()
   require(intentValue == NoJdk) {
@@ -127,8 +120,8 @@ fun projectWizardJdkComboBox(
   }
   intentProperty.set(comboBox.item)
 
-  return row.cell(comboBox)
-    .columns(COLUMNS_LARGE)
+  return cell(comboBox)
+    .align(AlignX.FILL)
     .apply {
       val commentCell = comment(component.comment, 50)
       component.addItemListener {
@@ -150,11 +143,8 @@ fun projectWizardJdkComboBox(
     .validationOnApply {
       val intent = it.selectedItem
 
-      if (isWindows) {
-        // todo: remove this when JDK over Eel is enabled by default
-        val wslJDKValidation = validateJdkAndProjectCompatibility(intent, eelDescriptorProperty.get())
-        if (wslJDKValidation != null) return@validationOnApply wslJDKValidation
-      }
+      val jdkCompatibilityValidation = validateJdkAndProjectCompatibility(intent, eelDescriptorProperty.get())
+      if (jdkCompatibilityValidation != null) return@validationOnApply jdkCompatibilityValidation
 
       if (intent is DownloadJdk) {
         return@validationOnApply validateInstallDir(intent)
@@ -171,6 +161,9 @@ fun projectWizardJdkComboBox(
       }
       PropertiesComponent.getInstance().setValue(selectedJdkProperty, intent.name)
     }
+    .onApply {
+      context.projectJdk = intentProperty.get().prepareJdk()
+    }
 }
 
 private fun ValidationInfoBuilder.validateInstallDir(intent: DownloadJdk): ValidationInfo? {
@@ -186,17 +179,13 @@ private fun ValidationInfoBuilder.validateJdkAndProjectCompatibility(intent: Any
     is ExistingJdk -> intent.jdk.homePath
     is DetectedJdk -> intent.home
     else -> null
+  } ?: return null
+
+  val projectRelatedMachine = eelDescriptor.getResolvedEelMachine() ?: LocalEelMachine
+  if (!projectRelatedMachine.ownsPath(Path.of(path))) {
+    return error(JavaUiBundle.message("jdk.incompatible.location.error", Path.of(path).getEelDescriptor().name, eelDescriptor.name))
   }
 
-  //todo this code is temporary and should be removed together with the java.home.finder.use.eel flag
-  val isProjectWSL = eelDescriptor.osFamily != EelOsFamily.Windows && isWindows
-
-  if (path != null && WslPath.isWslUncPath(path) != isProjectWSL) {
-    return when (isProjectWSL) {
-      true -> error(JavaUiBundle.message("jdk.wsl.windows.error"))
-      false -> error(JavaUiBundle.message("jdk.windows.wsl.error"))
-    }
-  }
   return null
 }
 
@@ -522,7 +511,7 @@ private fun computeRegisteredSdks(key: EelDescriptor?): List<ExistingJdk> {
     .filter { jdk ->
       jdk.sdkType is JavaSdkType &&
       jdk.sdkType !is DependentSdkType &&
-      (key == null || ProjectSdksModel.sdkMatchesEel(key, jdk))
+      (key == null || ProjectSdksModel.sdkMatchesEel(key.getResolvedEelMachine() ?: LocalEelMachine, jdk))
     }
     .map { ExistingJdk(it) }
 }

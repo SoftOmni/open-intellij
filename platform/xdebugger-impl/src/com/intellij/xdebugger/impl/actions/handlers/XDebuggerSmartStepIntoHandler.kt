@@ -9,6 +9,7 @@ import com.intellij.codeInsight.hint.HintUtil
 import com.intellij.codeInsight.unwrap.ScopeHighlighter
 import com.intellij.execution.filters.HyperlinkInfo
 import com.intellij.execution.impl.EditorHyperlinkSupport
+import com.intellij.ide.rpc.util.textRange
 import com.intellij.ide.ui.icons.icon
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.idea.AppMode
@@ -45,13 +46,14 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.popup.list.ListPopupImpl
 import com.intellij.util.ObjectUtils
 import com.intellij.util.SmartList
+import com.intellij.util.ui.EDT
 import com.intellij.util.ui.UIUtil
 import com.intellij.xdebugger.XDebugSessionListener
 import com.intellij.xdebugger.XDebuggerBundle
 import com.intellij.xdebugger.XSourcePosition
 import com.intellij.xdebugger.impl.actions.XDebuggerActions
 import com.intellij.xdebugger.impl.actions.XDebuggerProxySuspendedActionHandler
-import com.intellij.xdebugger.impl.frame.XDebugSessionProxy
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy
 import com.intellij.xdebugger.impl.performDebuggerActionAsync
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil
 import com.intellij.xdebugger.stepping.XSmartStepIntoVariant
@@ -83,10 +85,7 @@ private fun XSmartStepIntoTargetDto.target(): XSmartStepIntoTarget {
     override fun getText(): @NlsSafe String? = this@target.text
     override fun getDescription(): @Nls String? = this@target.description
     override fun getIcon(): Icon? = this@target.iconId?.icon()
-    override fun getHighlightRange(): TextRange? {
-      val (start, end) = this@target.textRange ?: return null
-      return TextRange(start, end)
-    }
+    override fun getHighlightRange(): TextRange? = this@target.textRange?.textRange()
   })
 }
 
@@ -131,6 +130,7 @@ internal open class XDebuggerSmartStepIntoHandler : XDebuggerProxySuspendedActio
         throw ce
       }
       catch (_: Throwable) {
+        // TODO: need to show some error notification here, but currently we don't have a proper error handling mechanism
         session.stepInto(ignoreBreakpoints = false)
       }
     }
@@ -240,16 +240,21 @@ class SmartStepData(
     myHighlighters[index].setTextAttributesKey(attributesKey)
   }
 
-  internal suspend fun stepInto(variant: VariantInfo) {
-    clear()
-    XDebugSessionApi.getInstance().smartStepInto(variant.target.id)
+  internal fun stepInto(variant: VariantInfo) {
+    UIUtil.invokeLaterIfNeeded {
+      clear()
+    }
+    session.coroutineScope.launch {
+      XDebugSessionApi.getInstance().smartStepInto(variant.target.id)
+    }
   }
 
-  internal suspend fun stepIntoCurrent() {
+  internal fun stepIntoCurrent() {
     stepInto(myCurrentVariant!!)
   }
 
   internal fun clear() {
+    EDT.assertIsEdt()
     editor.putUserData(SMART_STEP_INPLACE_DATA, null)
     editor.putUserData(SMART_STEP_HINT_DATA, null)
     val highlightManager = HighlightManager.getInstance(session.project) as HighlightManagerImpl
@@ -347,7 +352,7 @@ private class RightHandler(original: EditorActionHandler) : SmartStepEditorActio
 
 private class EscHandler(original: EditorActionHandler) : SmartStepEditorActionHandler(original) {
   override fun myPerform(editor: Editor, caret: Caret?, dataContext: DataContext, stepData: SmartStepData) {
-    editor.putUserData(SMART_STEP_INPLACE_DATA, null)
+    editor.getUserData(SMART_STEP_INPLACE_DATA)?.clear()
     if (myOriginalHandler.isEnabled(editor, caret, dataContext)) {
       myOriginalHandler.execute(editor, caret, dataContext)
     }
@@ -357,9 +362,7 @@ private class EscHandler(original: EditorActionHandler) : SmartStepEditorActionH
 @ApiStatus.Internal
 open class XDebugSmartStepIntoEnterHandler(original: EditorActionHandler) : SmartStepEditorActionHandler(original) {
   override fun myPerform(editor: Editor, caret: Caret?, dataContext: DataContext, stepData: SmartStepData) {
-    stepData.session.coroutineScope.launch {
-      stepData.stepIntoCurrent()
-    }
+    stepData.stepIntoCurrent()
   }
 }
 
@@ -456,11 +459,9 @@ private fun inplaceChoose(
       highlightManager.addOccurrenceHighlight(editor, range.startOffset, range.endOffset,
                                               DebuggerColors.SMART_STEP_INTO_TARGET,
                                               HighlightManager.HIDE_BY_ESCAPE or HighlightManager.HIDE_BY_TEXT_CHANGE, highlighters)
-      val highlighter = highlighters[0]
+      val highlighter = highlighters.first()
       hyperlinkSupport.createHyperlink(highlighter, HyperlinkInfo {
-        session.coroutineScope.launch {
-          data.stepInto(info)
-        }
+        data.stepInto(info)
       })
       data.myHighlighters.add(highlighter)
     }
@@ -473,7 +474,6 @@ private fun inplaceChoose(
   LOG.assertTrue(data.myCurrentVariant != null)
   editor.putUserData(SMART_STEP_INPLACE_DATA, data)
 
-  session.updateExecutionPosition()
   if (AppMode.isRemoteDevHost()) {
     val virtualFile = editor.virtualFile
     // in the case of remote development the ordinary focus request doesn't work, we need to use FileEditorManagerEx api to focus the editor

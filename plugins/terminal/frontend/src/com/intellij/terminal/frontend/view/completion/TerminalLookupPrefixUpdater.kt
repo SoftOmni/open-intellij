@@ -1,9 +1,12 @@
 package com.intellij.terminal.frontend.view.completion
 
+import com.intellij.codeInsight.completion.CompletionPhase
 import com.intellij.codeInsight.completion.impl.CompletionServiceImpl
+import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.impl.LookupImpl
 import com.intellij.openapi.application.UiWithModelAccess
 import com.intellij.openapi.util.Key
+import com.intellij.terminal.frontend.view.impl.toRelative
 import com.intellij.util.asDisposable
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.*
@@ -14,8 +17,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModelListener
+import org.jetbrains.plugins.terminal.view.TerminalContentChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalCursorOffsetChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.TerminalOutputModelListener
 
 @ApiStatus.Internal
 class TerminalLookupPrefixUpdater private constructor(
@@ -28,15 +33,15 @@ class TerminalLookupPrefixUpdater private constructor(
   private val pendingRequestsCount: MutableStateFlow<Int> = MutableStateFlow(0)
 
   init {
-    coroutineScope.launch {
-      model.cursorOffsetState.collect {
+    model.addListener(coroutineScope.asDisposable(), object : TerminalOutputModelListener {
+      override fun cursorOffsetChanged(event: TerminalCursorOffsetChangeEvent) {
         pendingRequestsCount.update { it + 1 }
-        prefixUpdateRequests.send(Unit)
+        prefixUpdateRequests.trySend(Unit)
       }
-    }
+    })
 
     model.addListener(coroutineScope.asDisposable(), object : TerminalOutputModelListener {
-      override fun afterContentChanged(model: TerminalOutputModel, startOffset: Int, isTypeAhead: Boolean) {
+      override fun afterContentChanged(event: TerminalContentChangeEvent) {
         pendingRequestsCount.update { it + 1 }
         prefixUpdateRequests.trySend(Unit)
       }
@@ -78,7 +83,7 @@ class TerminalLookupPrefixUpdater private constructor(
     appendPrefix(textToAppend)
 
     if (!lookup.isLookupDisposed && (truncateTimes > 0 || textToAppend.isNotEmpty())) {
-      CompletionServiceImpl.currentCompletionProgressIndicator?.prefixUpdated()
+      closeLookupIfMeaningless()
     }
   }
 
@@ -88,12 +93,12 @@ class TerminalLookupPrefixUpdater private constructor(
   }
 
   private fun calculateUpdatedPrefix(): String? {
-    val startOffset = lookup.lookupStart
-    val caretOffset = model.cursorOffsetState.value.toRelative()
+    val startOffset = model.startOffset + lookup.lookupStart.toLong()
+    val caretOffset = model.cursorOffset
     if (caretOffset < startOffset) {
       return null  // It looks like the lookup is not valid
     }
-    return model.document.immutableCharSequence.substring(startOffset, caretOffset)
+    return model.getText(startOffset, caretOffset).toString()
   }
 
   private fun truncatePrefix(times: Int) {
@@ -111,7 +116,7 @@ class TerminalLookupPrefixUpdater private constructor(
       // Hide the lookup if the prefix became empty after truncation
       val curPrefix = calculateCurPrefix()
       if (curPrefix != null && curPrefix.isEmpty()) {
-        lookup.hideLookup(true)
+        lookup.hideLookup(false)
         return
       }
     }
@@ -122,24 +127,51 @@ class TerminalLookupPrefixUpdater private constructor(
       if (lookup.isLookupDisposed) {
         return
       }
+      lookup.fireBeforeAppendPrefix(c)
       lookup.appendPrefix(c)
     }
   }
 
   private fun closeLookupOrRestart() {
     // If the cursor was placed right before the lookup start offset, let's restart the completion
-    val cursorOffset = model.cursorOffsetState.value.toRelative()
+    val cursorOffset = model.cursorOffset.toRelative(model)
     if (cursorOffset == lookup.lookupOriginalStart - 1) {
       CompletionServiceImpl.currentCompletionProgressIndicator?.scheduleRestart()
     }
     else {
-      lookup.hideLookup(true)
+      lookup.hideLookup(false)
     }
+  }
+
+  /**
+   * Similar to [com.intellij.codeInsight.completion.CompletionProgressIndicator.hideAutopopupIfMeaningless]
+   * but closes the lookup even if was called manually.
+   */
+  private fun closeLookupIfMeaningless() {
+    if (lookup.isLookupDisposed || lookup.isCalculating) {
+      return
+    }
+
+    lookup.refreshUi(true, false)
+    val noMeaningfulItems = lookup.items.all {
+      isAlreadyTyped(it)
+    }
+    if (noMeaningfulItems) {
+      lookup.hideLookup(false)
+      CompletionServiceImpl.setCompletionPhase(CompletionPhase.NoCompletion)
+    }
+  }
+
+  /** Similar to [com.intellij.codeInsight.completion.CompletionProgressIndicator.isAlreadyInTheEditor] */
+  private fun isAlreadyTyped(element: LookupElement): Boolean {
+    val startOffset = model.cursorOffset - lookup.itemPattern(element).length.toLong()
+    return startOffset >= model.startOffset
+           && model.getText(startOffset, model.endOffset).startsWith(element.lookupString)
   }
 
   private fun syncEditorCaretWithOutputModel() {
     if (!lookup.isLookupDisposed) {
-      val cursorOffset = model.cursorOffsetState.value.toRelative()
+      val cursorOffset = model.cursorOffset.toRelative(model)
       lookup.performGuardedChange {
         lookup.editor.caretModel.moveToOffset(cursorOffset)
       }

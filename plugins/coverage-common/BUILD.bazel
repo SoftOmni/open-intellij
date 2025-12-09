@@ -34,11 +34,13 @@ jvm_library(
     "//platform/platform-impl/concurrency",
     "//platform/util/diff",
     "//platform/vcs-api:vcs",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/core-ui",
     "//platform/statistics",
     "//platform/util/jdom",
     "//plugins/coverage-common/intellij.platform.coverage.agent:coverage-agent",
+    "//platform/core-impl",
+    "//platform/execution",
   ]
 )
 
@@ -71,12 +73,14 @@ jvm_library(
     "//platform/platform-impl/concurrency",
     "//platform/util/diff",
     "//platform/vcs-api:vcs",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/core-ui",
     "//platform/statistics",
     "//platform/statistics:statistics_test_lib",
     "//platform/util/jdom",
     "//plugins/coverage-common/intellij.platform.coverage.agent:coverage-agent",
+    "//platform/core-impl",
+    "//platform/execution",
   ]
 )
 ### auto-generated section `build intellij.platform.coverage` end

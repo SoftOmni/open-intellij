@@ -8,6 +8,7 @@ import kotlinx.collections.immutable.persistentListOf
 import org.jetbrains.intellij.build.dependencies.BuildDependenciesDownloader
 import org.jetbrains.intellij.build.impl.BundledMavenDownloader
 import org.jetbrains.intellij.build.impl.LibraryPackMode
+import org.jetbrains.intellij.build.impl.ModuleItem
 import org.jetbrains.intellij.build.impl.PluginLayout
 import org.jetbrains.intellij.build.impl.PluginLayout.Companion.plugin
 import org.jetbrains.intellij.build.impl.PluginLayout.Companion.pluginAuto
@@ -23,7 +24,6 @@ import org.jetbrains.intellij.build.kotlin.CommunityKotlinPluginBuilder
 import org.jetbrains.intellij.build.python.PythonCommunityPluginModules
 import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
 import org.jetbrains.intellij.build.telemetry.use
-import org.jetbrains.jps.model.library.JpsOrderRootType
 import java.net.URI
 import java.nio.file.Path
 import java.util.Locale
@@ -38,7 +38,7 @@ object CommunityRepositoryModules {
       spec.withModule("intellij.ant.jps", "ant-jps.jar")
 
       spec.withGeneratedResources { dir, buildContext ->
-        copyAnt(pluginDir = dir, context = buildContext)
+        copyAnt(mainModule = spec.mainModule, pluginDir = dir, context = buildContext)
       }
     },
     plugin("intellij.laf.macos") { spec ->
@@ -75,7 +75,6 @@ object CommunityRepositoryModules {
       spec.directoryName = "tasks"
       spec.withModule("intellij.tasks")
       spec.withModule("intellij.tasks.compatibility")
-      spec.withModule("intellij.tasks.jira")
       spec.withModule("intellij.tasks.java")
     },
     pluginAuto(listOf("intellij.xslt.debugger")) { spec ->
@@ -215,8 +214,6 @@ object CommunityRepositoryModules {
     plugin("intellij.repository.search") { spec ->
       spec.withModule("intellij.maven.model", relativeJarPath = "maven-model.jar")
       spec.withProjectLibrary("package-search-api-client")
-      spec.withProjectLibrary("ktor-client-logging")
-      spec.withProjectLibrary("kotlinx-document-store-mvstore")
     },
     pluginAuto("intellij.java.jshell") { spec ->
       spec.withModule("intellij.java.jshell.protocol", "jshell-protocol.jar")
@@ -315,8 +312,6 @@ object CommunityRepositoryModules {
       // modules:
       // adt-ui.jar
       spec.withModule("intellij.android.adt.ui.compose", "adt-ui.jar")
-      spec.withModuleLibrary("jewel-ide-laf-bridge-243", "intellij.android.adt.ui.compose", "jewel-ide-laf-bridge-243.jar")
-      spec.withModuleLibrary("jewel-markdown-ide-laf-bridge-styling-243", "intellij.android.adt.ui.compose", "jewel-markdown-ide-laf-bridge-styling-243.jar")
       spec.withModule("intellij.android.adt.ui.model", "adt-ui.jar")
       spec.withModule("intellij.android.adt.ui", "adt-ui.jar")
 
@@ -457,8 +452,6 @@ object CommunityRepositoryModules {
       spec.withModule("intellij.android.execution.common", "android.jar")
       spec.withModule("intellij.android.avd", "android.jar")
 
-      spec.withModule("intellij.android.safemode", "android.jar")
-
       spec.withModule("intellij.android.preview-fast-compile", "android.jar")
       spec.withModule("intellij.android.completion", "android.jar")
 
@@ -511,8 +504,6 @@ object CommunityRepositoryModules {
       //spec.withModuleLibrary("compose-desktop-ui", "intellij.android.adt.ui.compose", "")
       //spec.withModuleLibrary("skiko", "intellij.android.adt.ui.compose", "")
 
-      spec.withProjectLibrary("asm-tools")
-
       val ffmpegVersion = "6.0-1.5.9"
       val javacppVersion = "1.5.9"
 
@@ -532,18 +523,17 @@ object CommunityRepositoryModules {
           spec.withModuleLibrary(javacppLibraryName, "intellij.android.streaming", "${javacppLibraryName}-$javacppVersion.jar")
         }
         else {
+          val streamingModuleName = "intellij.android.streaming"
+
           spec.withGeneratedPlatformResources(supportedOs, supportedArch, supportedLibc) { targetDir, context ->
-            val streamingModule = context.projectModel.project.findModuleByName("intellij.android.streaming")!!
-            val ffmpegLibrary = streamingModule.libraryCollection.findLibrary(ffmpegLibraryName)!!
-            val javacppLibrary = streamingModule.libraryCollection.findLibrary(javacppLibraryName)!!
             val libDir = targetDir.resolve("lib")
 
-            copyFileToDir(ffmpegLibrary.getFiles(JpsOrderRootType.COMPILED)[0].toPath(), libDir)
-            copyFileToDir(javacppLibrary.getFiles(JpsOrderRootType.COMPILED)[0].toPath(), libDir)
+            copyFileToDir(context.findLibraryRoots(ffmpegLibraryName, moduleLibraryModuleName = streamingModuleName).single(), libDir)
+            copyFileToDir(context.findLibraryRoots(javacppLibraryName, moduleLibraryModuleName = streamingModuleName).single(), libDir)
           }
 
-          spec.excludeModuleLibrary(ffmpegLibraryName, "intellij.android.streaming")
-          spec.excludeModuleLibrary(javacppLibraryName, "intellij.android.streaming")
+          spec.excludeModuleLibrary(ffmpegLibraryName, streamingModuleName)
+          spec.excludeModuleLibrary(javacppLibraryName, streamingModuleName)
         }
       }
 
@@ -666,11 +656,13 @@ object CommunityRepositoryModules {
   }
 }
 
-private suspend fun copyAnt(pluginDir: Path, context: BuildContext): List<DistributionFileEntry> {
+private suspend fun copyAnt(mainModule: String, pluginDir: Path, context: BuildContext): List<DistributionFileEntry> {
   val antDir = pluginDir.resolve("dist")
   return spanBuilder("copy Ant lib").setAttribute("antDir", antDir.toString()).use {
     val sources = ArrayList<ZipSource>()
-    val libraryData = ProjectLibraryData(libraryName = "Ant", packMode = LibraryPackMode.STANDALONE_MERGED, reason = "ant")
+    val antTargetFile = antDir.resolve("ant.jar")
+    val antModuleItem = ModuleItem(mainModule, relativeOutputFile = antTargetFile.fileName.toString(), reason = "ant")
+    val libraryData = ProjectLibraryData(libraryName = "Ant", packMode = LibraryPackMode.STANDALONE_MERGED, reason = "ant", owner = antModuleItem)
     copyDir(
       sourceDir = context.paths.communityHomeDir.resolve("lib/ant"),
       targetDir = antDir,
@@ -687,7 +679,6 @@ private suspend fun copyAnt(pluginDir: Path, context: BuildContext): List<Distri
     )
     sources.sort()
 
-    val antTargetFile = antDir.resolve("ant.jar")
     checkForNoDiskSpace(context) {
       buildJar(targetFile = antTargetFile, sources = sources)
     }
@@ -697,6 +688,7 @@ private suspend fun copyAnt(pluginDir: Path, context: BuildContext): List<Distri
         path = antTargetFile,
         data = libraryData,
         libraryFile = source.file,
+        canonicalLibraryPath = context.paths.communityHomeDir.relativize(source.file).toString(),
         hash = 0,
         size = 0,
         relativeOutputFile = "dist/ant.jar",

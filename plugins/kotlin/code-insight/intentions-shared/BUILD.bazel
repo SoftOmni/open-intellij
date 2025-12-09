@@ -26,7 +26,7 @@ jvm_library(
   kotlinc_opts = ":custom_kotlin-code-insight-intentions-shared",
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlin-reflect",
+    "//libraries/kotlin/reflect",
     "@lib//:kotlinc-kotlin-compiler-common",
     "@lib//:kotlinc-analysis-api",
     "//libraries/guava",
@@ -50,7 +50,7 @@ jvm_library(
     "//platform/lang-api:lang",
     "//java/java-psi-api:psi",
     "//platform/code-style-impl:codeStyle-impl",
-    "//plugins/kotlin/code-insight/impl-base",
+    "//plugins/kotlin/code-insight/impl-base:kotlin-codeInsight-shared",
     "//platform/lang-impl",
     "//plugins/kotlin/refactorings/kotlin.refactorings.common:kotlin-refactorings-common",
     "//java/openapi:java",

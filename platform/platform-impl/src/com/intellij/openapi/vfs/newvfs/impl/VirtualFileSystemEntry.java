@@ -292,7 +292,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
   @Override
   public void markDirty() {
-    if (!isDirty()) {
+    if (!isDirty()) {//TODO RC: [isDirty() -> markDirtyInternal()] are non-atomic!
       markDirtyInternal();
       VirtualFileSystemEntry parent = getParent();
       if (parent != null) parent.markDirty();
@@ -869,6 +869,16 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
     @Override
     public @Nullable NewVirtualFile findChildIfCached(@NotNull String name) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean allChildrenLoaded() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean allChildrenCached() {
       throw new UnsupportedOperationException();
     }
 

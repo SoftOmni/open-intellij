@@ -1,14 +1,14 @@
 package com.intellij.terminal.frontend.view.impl
 
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.updateContent
-import org.jetbrains.plugins.terminal.session.TerminalContentUpdatedEvent
-import org.jetbrains.plugins.terminal.session.TerminalCursorPositionChangedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalContentUpdatedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalCursorPositionChangedEvent
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModel
+import org.jetbrains.plugins.terminal.view.impl.updateContent
 
 /**
  * Simple implementation of the [TerminalOutputModelController] that just updates the output model immediately.
  */
-internal class TerminalOutputModelControllerImpl(override val model: TerminalOutputModel) : TerminalOutputModelController {
+internal class TerminalOutputModelControllerImpl(override val model: MutableTerminalOutputModel) : TerminalOutputModelController {
   override fun updateContent(event: TerminalContentUpdatedEvent) {
     model.updateContent(event)
   }

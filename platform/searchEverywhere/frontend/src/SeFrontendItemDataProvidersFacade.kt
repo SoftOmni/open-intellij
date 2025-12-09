@@ -6,6 +6,7 @@ import com.intellij.platform.project.ProjectId
 import com.intellij.platform.scopes.SearchScopesInfo
 import com.intellij.platform.searchEverywhere.*
 import com.intellij.platform.searchEverywhere.impl.SeRemoteApi
+import com.intellij.platform.searchEverywhere.presentations.SeItemPresentation
 import com.intellij.platform.searchEverywhere.providers.SeLog
 import com.intellij.platform.searchEverywhere.providers.SeLog.ITEM_EMIT
 import com.intellij.platform.searchEverywhere.providers.target.SeTypeVisibilityStatePresentation
@@ -93,6 +94,18 @@ class SeFrontendItemDataProvidersFacade(private val projectId: ProjectId,
 
   suspend fun isPreviewEnabled(): Boolean {
     return SeRemoteApi.getInstance().isPreviewEnabled(
+      projectId, providerIds = providerIds, session = session, dataContextId = dataContextId, isAllTab = isAllTab
+    )
+  }
+
+  suspend fun isExtendedInfoEnabled(): Boolean {
+    return SeRemoteApi.getInstance().isExtendedInfoEnabled(
+      projectId, providerIds = providerIds, session = session, dataContextId = dataContextId, isAllTab = isAllTab
+    )
+  }
+
+  suspend fun isCommandsSupported(): Boolean {
+    return SeRemoteApi.getInstance().isCommandsSupported(
       projectId, providerIds = providerIds, session = session, dataContextId = dataContextId, isAllTab = isAllTab
     )
   }

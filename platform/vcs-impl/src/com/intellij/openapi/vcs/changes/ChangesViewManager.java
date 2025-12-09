@@ -4,20 +4,15 @@ package com.intellij.openapi.vcs.changes;
 
 import com.intellij.diagnostic.Activity;
 import com.intellij.diagnostic.StartUpMeasurer;
-import com.intellij.diff.impl.DiffEditorViewer;
 import com.intellij.diff.tools.util.DiffDataKeys;
 import com.intellij.diff.util.DiffUtil;
-import com.intellij.ide.DataManager;
 import com.intellij.ide.dnd.DnDEvent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
-import com.intellij.openapi.application.AppUIExecutor;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.options.advanced.AdvancedSettingsChangeListener;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
@@ -26,28 +21,19 @@ import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.*;
-import com.intellij.openapi.vcs.changes.actions.diff.ShowDiffFromLocalChangesActionProvider;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.changes.shelf.ShelveChangesManager;
 import com.intellij.openapi.vcs.changes.ui.*;
-import com.intellij.openapi.vcs.telemetry.VcsBackendTelemetrySpan.ChangesView;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.ToolWindow;
-import com.intellij.platform.diagnostic.telemetry.TelemetryManager;
-import com.intellij.platform.vcs.impl.shared.RdLocalChanges;
-import com.intellij.platform.vcs.impl.shared.changes.ChangeListsViewModel;
-import com.intellij.platform.vcs.impl.shared.changes.ChangesViewDataKeys;
-import com.intellij.platform.vcs.impl.shared.changes.ChangesViewSettings;
 import com.intellij.platform.vcs.impl.shared.changes.PreviewDiffSplitterComponent;
-import com.intellij.platform.vcs.impl.shared.telemetry.VcsScopeKt;
-import com.intellij.problems.ProblemListener;
-import com.intellij.ui.ComponentUtil;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.content.Content;
-import com.intellij.util.*;
-import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.ModalityUiUtil;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
@@ -55,21 +41,17 @@ import com.intellij.util.ui.JBDimension;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.components.BorderLayoutPanel;
-import com.intellij.util.ui.tree.TreeUtil;
+import com.intellij.vcs.changes.viewModel.ChangesViewProxy;
 import com.intellij.vcs.commit.*;
-import com.intellij.vcsUtil.VcsUtil;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.Tracer;
-import org.jetbrains.annotations.*;
-import org.jetbrains.concurrency.Promise;
-import org.jetbrains.concurrency.Promises;
+import kotlinx.coroutines.CoroutineScope;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.TreePath;
-import java.awt.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -78,29 +60,25 @@ import static com.intellij.openapi.vcs.changes.ui.ChangesViewContentManager.*;
 import static com.intellij.openapi.vcs.changes.ui.ChangesViewContentManagerKt.isCommitToolWindowShown;
 import static com.intellij.openapi.vcs.changes.ui.ChangesViewContentManagerKt.subscribeOnVcsToolWindowLayoutChanges;
 import static com.intellij.util.ui.JBUI.Panels.simplePanel;
-import static java.util.Arrays.asList;
-import static org.jetbrains.concurrency.Promises.cancelledPromise;
 
 public class ChangesViewManager implements ChangesViewEx, Disposable {
-
-  private static final Tracer TRACER = TelemetryManager.getInstance().getTracer(VcsScopeKt.VcsScope);
   private static final String CHANGES_VIEW_PREVIEW_SPLITTER_PROPORTION = "ChangesViewManager.DETAILS_SPLITTER_PROPORTION";
 
+  private final @NotNull CoroutineScope myScope;
   private final @NotNull Project myProject;
 
-  private @Nullable ChangesViewPanel myChangesPanel;
+  private @Nullable ChangesViewProxy myChangesView;
   private @Nullable ChangesViewToolWindowPanel myToolWindowPanel;
 
   @NotNull
   @RequiresEdt
-  ChangesViewPanel initChangesPanel() {
-    if (myChangesPanel == null) {
+  ChangesViewProxy initChangesView() {
+    if (myChangesView == null) {
       Activity activity = StartUpMeasurer.startActivity("ChangesViewPanel initialization");
-      ChangesListView tree = new LocalChangesListView(myProject);
-      myChangesPanel = new ChangesViewPanel(tree, this);
+      myChangesView = ChangesViewProxy.create(myProject, myScope);
       activity.end();
     }
-    return myChangesPanel;
+    return myChangesView;
   }
 
   @RequiresEdt
@@ -108,9 +86,8 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
     if (myToolWindowPanel == null) {
       Activity activity = StartUpMeasurer.startActivity("ChangesViewToolWindowPanel initialization");
 
-      // ChangesViewPanel is used for a singular ChangesViewToolWindowPanel instance. Cleanup is not needed.
-      ChangesViewPanel changesViewPanel = initChangesPanel();
-      ChangesViewToolWindowPanel panel = new ChangesViewToolWindowPanel(myProject, ChangesViewSettings.getInstance(myProject), changesViewPanel);
+      ChangesViewProxy changesView = initChangesView();
+      ChangesViewToolWindowPanel panel = new ChangesViewToolWindowPanel(myProject, changesView);
       Disposer.register(this, panel);
 
       panel.updateCommitWorkflow();
@@ -118,21 +95,29 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
       myToolWindowPanel = panel;
       Disposer.register(panel, () -> {
         // Content is removed from TW
-        myChangesPanel = null;
+        myChangesView = null;
         myToolWindowPanel = null;
       });
+      Disposer.register(panel, changesView);
 
       activity.end();
     }
     return myToolWindowPanel;
   }
 
-  public ChangesViewManager(@NotNull Project project) {
+  public ChangesViewManager(@NotNull Project project, @NotNull CoroutineScope coroutineScope) {
+    myScope = coroutineScope;
     myProject = project;
-    ChangesViewModifier.KEY.addChangeListener(project, this::resetViewImmediatelyAndRefreshLater, this);
 
     MessageBusConnection busConnection = project.getMessageBus().connect(this);
     busConnection.subscribe(ChangesViewWorkflowManager.TOPIC, () -> updateCommitWorkflow());
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public @NotNull ChangesViewCommitWorkflowUi createCommitPanel() {
+    ChangesViewProxy changesView = initChangesView();
+    return new ChangesViewCommitPanel(myProject, changesView);
   }
 
   public static class DisplayNameSupplier implements Supplier<String> {
@@ -170,15 +155,17 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
   public void dispose() {
   }
 
-  public static class ContentPreloader implements ChangesViewContentProvider.Preloader {
+  static class ContentPreloader implements ChangesViewContentProvider.Preloader {
     private final @NotNull Project myProject;
 
-    public ContentPreloader(@NotNull Project project) {
+    ContentPreloader(@NotNull Project project) {
       myProject = project;
     }
 
     @Override
     public void preloadTabContent(@NotNull Content content) {
+      new ChangesViewCommitTabTitleUpdater(myProject, LOCAL_CHANGES).init(content);
+
       content.putUserData(Content.TAB_DND_TARGET_KEY, new MyContentDnDTarget(myProject, content));
     }
   }
@@ -192,56 +179,44 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
   }
 
   @Override
-  public @NotNull Promise<?> promiseRefresh(@NotNull ModalityState modalityState) {
-    if (myToolWindowPanel == null) return cancelledPromise();
-    return myToolWindowPanel.scheduleRefreshWithDelay(0, modalityState);
+  public void scheduleRefresh(@NotNull Runnable callback) {
+    if (myChangesView == null) return;
+    myChangesView.scheduleRefreshNow(callback);
   }
 
   @Override
   public void scheduleRefresh() {
-    if (myToolWindowPanel == null) return;
-    myToolWindowPanel.scheduleRefresh();
+    if (myChangesView == null) return;
+    myChangesView.scheduleDelayedRefresh();
   }
 
   @Override
   public void selectFile(VirtualFile vFile) {
-    if (myToolWindowPanel == null) return;
-    myToolWindowPanel.selectFile(vFile);
+    if (myChangesView == null) return;
+    myChangesView.selectFile(vFile);
   }
 
   @Override
   public void selectChanges(@NotNull List<? extends Change> changes) {
-    if (myToolWindowPanel == null) return;
-    myToolWindowPanel.selectChanges(changes);
+    if (myChangesView == null) return;
+    myChangesView.selectChanges(new ArrayList<>(changes));
   }
 
   @Override
-  public void updateProgressText(@NlsContexts.Label String text, boolean isError) {
+  public void updateProgressComponent(@NotNull List<Supplier<JComponent>> progress) {
     if (myToolWindowPanel == null) return;
-    myToolWindowPanel.updateProgressText(text, isError);
-  }
-
-  @Override
-  public void setBusy(boolean b) {
-    if (myToolWindowPanel == null) return;
-    myToolWindowPanel.setBusy(b);
+    myToolWindowPanel.updateProgressComponent(progress);
   }
 
   @Override
   public void setGrouping(@NotNull String groupingKey) {
-    if (myToolWindowPanel == null) return;
-    myToolWindowPanel.setGrouping(groupingKey);
+    if (myChangesView == null) return;
+    myChangesView.setGrouping(groupingKey);
   }
 
   private void updateCommitWorkflow() {
     if (myToolWindowPanel == null) return;
     myToolWindowPanel.updateCommitWorkflow();
-  }
-
-  @Override
-  public boolean isAllowExcludeFromCommit() {
-    if (myToolWindowPanel == null) return false;
-    return myToolWindowPanel.isAllowExcludeFromCommit();
   }
 
   public void closeEditorPreview(boolean onlyIfEmpty) {
@@ -251,8 +226,8 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
 
   @Override
   public void resetViewImmediatelyAndRefreshLater() {
-    if (myToolWindowPanel != null) {
-      myToolWindowPanel.resetViewImmediatelyAndRefreshLater();
+    if (myChangesView != null) {
+      myChangesView.resetViewImmediatelyAndRefreshLater();
     }
   }
 
@@ -265,25 +240,12 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
 
     @Override
     public void initTabContent(@NotNull Content content) {
-      if (RdLocalChanges.isEnabled()) {
-        // Action isn't executed unless a context component is showing,
-        // which makes things complicated in RD scenario because:
-        // * For Commit TW we still use PROJECTOR_STEALING hacking content of the particular tab.
-        // * The current content component in a backend TW is selected as the context component.
-        // (see `ToolWindowComponentIdProvider` and `ComponentIdOwner` for more insights).
-        // * An empty panel is used for this tab content on the backend.
-        //
-        // As a workaround, it's explicitly marked as shown.
-        ComponentUtil.markAsShowing(content.getComponent(), true);
-        return;
-      }
-
       ChangesViewManager viewManager = (ChangesViewManager)getInstance(myProject);
       ChangesViewToolWindowPanel panel = viewManager.initToolWindowPanel();
 
       content.setHelpId(ChangesListView.HELP_ID);
       content.setComponent(panel);
-      content.setPreferredFocusableComponent(panel.myView);
+      content.setPreferredFocusableComponent(panel.myChangesView.getPreferredFocusedComponent());
     }
   }
 
@@ -328,18 +290,17 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
     }
   }
 
-  public static final class ChangesViewToolWindowPanel extends SimpleToolWindowPanel implements Disposable {
+  private static final class ChangesViewToolWindowPanel extends SimpleToolWindowPanel implements Disposable {
     private static final @NotNull RegistryValue isOpenEditorDiffPreviewWithSingleClick =
       Registry.get("show.diff.preview.as.editor.tab.with.single.click");
 
     private final @NotNull Project myProject;
-    private final @NotNull ChangesViewSettings myChangesViewSettings;
     private final @NotNull VcsConfiguration myVcsConfiguration;
 
     private final @NotNull Wrapper myMainPanelContent;
     private final @NotNull BorderLayoutPanel myContentPanel;
-    private final @NotNull ChangesViewPanel myChangesPanel;
-    private final @NotNull ChangesListView myView;
+
+    private final @NotNull ChangesViewProxy myChangesView;
 
     private final @NotNull ChangesViewCommitPanelSplitter myCommitPanelSplitter;
     private final @NotNull ChangesViewEditorDiffPreview myEditorDiffPreview;
@@ -350,34 +311,18 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
     private @Nullable ChangesViewCommitPanel myCommitPanel;
     private @Nullable ChangesViewCommitWorkflowHandler myCommitWorkflowHandler;
 
-    private final BackgroundRefresher<@Nullable Runnable> myBackgroundRefresher =
-      new BackgroundRefresher<>(getClass().getSimpleName() + " refresh", this);
-
-    private final EventDispatcher<Listener> myDispatcher = EventDispatcher.create(Listener.class);
-
     private boolean myDisposed = false;
 
     private ChangesViewToolWindowPanel(@NotNull Project project,
-                                       @NotNull ChangesViewSettings changesViewSettings,
-                                       @NotNull ChangesViewPanel changesViewPanel) {
+                                       @NotNull ChangesViewProxy changesView) {
       super(false, true);
       myProject = project;
-      myChangesViewSettings = changesViewSettings;
-      myChangesPanel = changesViewPanel;
+      myChangesView = changesView;
+      myChangesView.initPanel();
 
       MessageBusConnection busConnection = myProject.getMessageBus().connect(this);
       myVcsConfiguration = VcsConfiguration.getInstance(myProject);
 
-      // ChangesViewPanel is used for a singular ChangesViewToolWindowPanel instance. Cleanup is not needed.
-      myView = myChangesPanel.getChangesView();
-      myView.installPopupHandler((DefaultActionGroup)ActionManager.getInstance().getAction("ChangesViewPopupMenu"));
-      ChangesTree.installGroupingSupport(myView.getGroupingSupport(),
-                                         changesViewSettings::getGroupingKeys,
-                                         changesViewSettings::setGroupingKeys,
-                                         () -> scheduleRefresh());
-      ChangesViewDnDSupport.install(myProject, myView, this);
-
-      ChangesViewPanelActions.initActions(myChangesPanel);
       registerShortcuts(this);
 
       ApplicationManager.getApplication().getMessageBus().connect(project)
@@ -393,77 +338,21 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
 
       myCommitPanelSplitter = new ChangesViewCommitPanelSplitter(myProject);
       Disposer.register(this, myCommitPanelSplitter);
-      myCommitPanelSplitter.setFirstComponent(myChangesPanel);
+      myCommitPanelSplitter.setFirstComponent(myChangesView.getPanel());
 
-      myContentPanel = new BorderLayoutPanel() {
-        @Override
-        public Dimension getMinimumSize() {
-          return isMinimumSizeSet() || myChangesPanel.isToolbarHorizontal()
-                 ? super.getMinimumSize()
-                 : myChangesPanel.getToolbar().getComponent().getPreferredSize();
-        }
-      };
+      myContentPanel = new BorderLayoutPanel();
       myContentPanel.addToCenter(myCommitPanelSplitter);
       myMainPanelContent = new Wrapper(myContentPanel);
       JPanel mainPanel = simplePanel(myMainPanelContent)
         .addToBottom(myProgressLabel);
 
-      myEditorDiffPreview = new ChangesViewEditorDiffPreview();
+      myEditorDiffPreview = new ChangesViewEditorDiffPreview(changesView, myContentPanel);
       Disposer.register(this, myEditorDiffPreview);
-
-      // Override the handlers registered by editorDiffPreview
-      myView.setDoubleClickHandler(e -> {
-        if (EditSourceOnDoubleClickHandler.isToggleEvent(myView, e)) return false;
-        if (performHoverAction()) return true;
-        if (myEditorDiffPreview.handleDoubleClick(e)) return true;
-        OpenSourceUtil.openSourcesFrom(DataManager.getInstance().getDataContext(myView), true);
-        return true;
-      });
-      myView.setEnterKeyHandler(e -> {
-        if (performHoverAction()) return true;
-        if (myEditorDiffPreview.handleEnterKey()) return true;
-        OpenSourceUtil.openSourcesFrom(DataManager.getInstance().getDataContext(myView), false);
-        return true;
-      });
 
       setContent(mainPanel);
 
       subscribeOnVcsToolWindowLayoutChanges(busConnection, this::updatePanelLayout);
       updatePanelLayout();
-
-      busConnection.subscribe(RemoteRevisionsCache.REMOTE_VERSION_CHANGED, () -> scheduleRefresh());
-      busConnection.subscribe(ProblemListener.TOPIC, new ProblemListener() {
-        @Override
-        public void problemsAppeared(@NotNull VirtualFile file) {
-          refreshChangesViewNodeAsync(file);
-        }
-
-        @Override
-        public void problemsDisappeared(@NotNull VirtualFile file) {
-          refreshChangesViewNodeAsync(file);
-        }
-      });
-      busConnection.subscribe(ChangeListListener.TOPIC, new MyChangeListListener());
-
-      busConnection.subscribe(ChangesViewModifier.TOPIC, () -> scheduleRefresh());
-      busConnection.subscribe(VcsManagedFilesHolder.TOPIC, () -> {
-        ApplicationManager.getApplication().invokeLater(() -> {
-          myView.repaint();
-        });
-      });
-      ChangeListsViewModel.getInstance(project).updateUiOnStateUpdate(this, () -> myView.repaint());
-
-      scheduleRefresh();
-    }
-
-    private boolean performHoverAction() {
-      ChangesBrowserNode<?> selected = VcsTreeModelData.selected(myView).iterateNodes().single();
-      if (selected == null) return false;
-
-      for (ChangesViewNodeAction extension : ChangesViewNodeAction.EP_NAME.getExtensions(myProject)) {
-        if (extension.handleDoubleClick(selected)) return true;
-      }
-      return false;
     }
 
     @Override
@@ -496,72 +385,12 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
       }
     }
 
-    private class ChangesViewEditorDiffPreview extends TreeHandlerEditorDiffPreview {
-      private ChangesViewEditorDiffPreview() {
-        super(myView, myContentPanel, ChangesViewDiffPreviewHandler.INSTANCE);
-      }
-
-      @Override
-      protected @NotNull DiffEditorViewer createViewer() {
-        return createDiffPreviewProcessor(true);
-      }
-
-      @Override
-      public void returnFocusToTree() {
-        ToolWindow toolWindow = getToolWindowFor(myProject, LOCAL_CHANGES);
-        if (toolWindow != null) toolWindow.activate(null);
-      }
-
-      @Override
-      public boolean openPreview(boolean requestFocus) {
-        return CommitToolWindowUtil.openDiff(LOCAL_CHANGES, this, requestFocus);
-      }
-
-      @Override
-      public void updateDiffAction(@NotNull AnActionEvent e) {
-        ShowDiffFromLocalChangesActionProvider.updateAvailability(e);
-      }
-
-      @Override
-      public @Nullable String getEditorTabName(@Nullable ChangeViewDiffRequestProcessor.Wrapper wrapper) {
-        return wrapper != null
-               ? VcsBundle.message("commit.editor.diff.preview.title", wrapper.getPresentableName())
-               : VcsBundle.message("commit.editor.diff.preview.empty.title");
-      }
-
-      @Override
-      protected boolean isOpenPreviewWithSingleClickEnabled() {
-        return isOpenEditorDiffPreviewWithSingleClick.asBoolean();
-      }
-
-      @Override
-      protected boolean isOpenPreviewWithSingleClick() {
-        if (myChangesPanel.getChangesView().isModelUpdateInProgress()) return false;
-        if (mySplitterDiffPreview != null && myVcsConfiguration.LOCAL_CHANGES_DETAILS_PREVIEW_SHOWN) return false;
-        return super.isOpenPreviewWithSingleClick();
-      }
-
-      @Override
-      protected boolean isPreviewOnDoubleClick() {
-        return isCommitToolWindowShown(myProject) ?
-               VcsApplicationSettings.getInstance().SHOW_EDITOR_PREVIEW_ON_DOUBLE_CLICK :
-               VcsApplicationSettings.getInstance().SHOW_DIFF_ON_DOUBLE_CLICK;
-      }
-
-      @Override
-      protected boolean isPreviewOnEnter() {
-        return isCommitToolWindowShown(myProject) ?
-               VcsApplicationSettings.getInstance().SHOW_EDITOR_PREVIEW_ON_DOUBLE_CLICK :
-               VcsApplicationSettings.getInstance().SHOW_DIFF_ON_DOUBLE_CLICK;
-      }
-    }
-
     private class ChangesViewSplitterDiffPreview implements DiffPreview, Disposable {
-      private final ChangesViewDiffPreviewProcessor myProcessor;
+      private final ChangeViewDiffRequestProcessor myProcessor;
       private final PreviewDiffSplitterComponent mySplitterComponent;
 
       private ChangesViewSplitterDiffPreview() {
-        myProcessor = createDiffPreviewProcessor(false);
+        myProcessor = myChangesView.createDiffPreviewProcessor(false);
         mySplitterComponent = new PreviewDiffSplitterComponent(myProcessor, CHANGES_VIEW_PREVIEW_SPLITTER_PROPORTION);
 
         mySplitterComponent.setFirstComponent(myContentPanel);
@@ -588,19 +417,6 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
       }
     }
 
-    private ChangesViewDiffPreviewProcessor createDiffPreviewProcessor(boolean isInEditor) {
-
-      ChangesViewDiffPreviewProcessor processor = new ChangesViewDiffPreviewProcessor(myView, isInEditor);
-      this.addListener(new Listener() {
-        @Override
-        public void allowExcludeFromCommitChanged() {
-          processor.setAllowExcludeFromCommit(ChangesViewToolWindowPanel.this.isAllowExcludeFromCommit());
-        }
-      }, processor);
-      processor.setAllowExcludeFromCommit(this.isAllowExcludeFromCommit());
-      return processor;
-    }
-
     private void closeEditorPreview(boolean onlyIfEmpty) {
       if (onlyIfEmpty && myEditorDiffPreview.hasContent()) return;
       myEditorDiffPreview.closePreview();
@@ -613,8 +429,6 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
       if (myCommitWorkflowHandler == newWorkflowHandler) return;
 
       if (newWorkflowHandler != null) {
-        newWorkflowHandler.addActivityListener(() -> myDispatcher.getMulticaster().allowExcludeFromCommitChanged());
-
         ChangesViewCommitPanel newCommitPanel = (ChangesViewCommitPanel)newWorkflowHandler.getUi();
         newCommitPanel.registerRootComponent(this);
         myCommitPanelSplitter.setSecondComponent(newCommitPanel.getComponent());
@@ -628,35 +442,25 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
         myCommitWorkflowHandler = null;
         myCommitPanel = null;
       }
-
-      myDispatcher.getMulticaster().allowExcludeFromCommitChanged();
       configureToolbars();
-    }
-
-    public boolean isAllowExcludeFromCommit() {
-      return myCommitWorkflowHandler != null && myCommitWorkflowHandler.isActive();
-    }
-
-    public void addListener(@NotNull Listener listener, @NotNull Disposable disposable) {
-      myDispatcher.addListener(listener, disposable);
     }
 
     private void configureToolbars() {
       boolean isToolbarHorizontal = CommitModeManager.getInstance(myProject).getCurrentCommitMode().useCommitToolWindow();
-      myChangesPanel.setToolbarHorizontal(isToolbarHorizontal);
+      myChangesView.setToolbarHorizontal(isToolbarHorizontal);
     }
 
     @Override
     public @NotNull List<AnAction> getActions(boolean originalProvider) {
-      return asList(myChangesPanel.getToolbarActionGroup().getChildren(ActionManager.getInstance()));
+      ActionManager actionManager = ActionManager.getInstance();
+      DefaultActionGroup toolbarActionGroup = (DefaultActionGroup)actionManager.getAction("ChangesViewToolbar.Shared");
+      return Arrays.asList(toolbarActionGroup.getChildren(actionManager));
     }
 
     @Override
     public void uiDataSnapshot(@NotNull DataSink sink) {
       super.uiDataSnapshot(sink);
       sink.set(DiffDataKeys.EDITOR_TAB_DIFF_PREVIEW, myEditorDiffPreview);
-      sink.set(ChangesViewDataKeys.SETTINGS, myChangesViewSettings);
-      sink.set(ChangesViewDataKeys.REFRESHER, () -> scheduleRefreshNow());
 
       // This makes COMMIT_WORKFLOW_HANDLER available anywhere in "Local Changes" - so commit executor actions are enabled.
       DataSink.uiDataSnapshot(sink, myCommitPanel);
@@ -683,174 +487,8 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
       });
     }
 
-    public void updateProgressText(@NlsContexts.Label String text, boolean isError) {
-      updateProgressComponent(Collections.singletonList(createTextStatusFactory(text, isError)));
-    }
-
-    public void setBusy(final boolean b) {
-      invokeLaterIfNeeded(() -> myView.setPaintBusy(b));
-    }
-
-    public void scheduleRefresh() {
-      scheduleRefreshWithDelay(100, ModalityState.nonModal());
-    }
-
-    private void scheduleRefreshNow() {
-      scheduleRefreshWithDelay(0, ModalityState.nonModal());
-    }
-
-    @CalledInAny
-    private @NotNull Promise<?> scheduleRefreshWithDelay(int delayMillis, @NotNull ModalityState modalityState) {
-      setBusy(true);
-      return myBackgroundRefresher.requestRefresh(delayMillis, this::refreshView)
-        .thenAsync(callback -> callback != null
-                               ? AppUIExecutor.onUiThread(modalityState).submit(callback)
-                               : Promises.rejectedPromise(Promises.createError("ChangesViewManager is not available", false)))
-        .onProcessed(__ -> setBusy(false));
-    }
-
-    @RequiresBackgroundThread
-    private @Nullable Runnable refreshView() {
-      if (myDisposed || !myProject.isInitialized() || ApplicationManager.getApplication().isUnitTestMode()) return null;
-
-      Span span = TRACER.spanBuilder(ChangesView.ChangesViewRefreshBackground.getName()).startSpan();
-      try {
-        ChangeListManagerImpl changeListManager = ChangeListManagerImpl.getInstanceImpl(myProject);
-        List<LocalChangeList> changeLists = changeListManager.getChangeLists();
-        List<FilePath> unversionedFiles = changeListManager.getUnversionedFilesPaths();
-
-        DefaultTreeModel treeModel = ChangesViewUtil.INSTANCE.createTreeModel(
-          myProject,
-          myView.getGrouping(),
-          changeLists,
-          unversionedFiles,
-          myChangesViewSettings.getShowIgnored(),
-          () -> isAllowExcludeFromCommit()
-        );
-
-        ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
-        indicator.checkCanceled();
-
-        boolean[] wasCalled = new boolean[1]; // ensure multiple merged refresh requests are applied once
-        return () -> {
-          if (wasCalled[0]) return;
-          wasCalled[0] = true;
-          refreshViewOnEdt(treeModel, changeLists, unversionedFiles, indicator.isCanceled());
-        };
-      }
-      finally {
-        span.end();
-      }
-    }
-
-    /**
-     * Immediately reset changes view and request refresh when NON_MODAL modality allows (i.e. after a plugin was unloaded or a dialog closed)
-     */
-    @RequiresEdt
-    private void resetViewImmediatelyAndRefreshLater() {
-      myView.setModel(new DefaultTreeModel(ChangesBrowserNode.createRoot()));
-      myView.setPaintBusy(true);
-      ApplicationManager.getApplication().invokeLater(() -> {
-        scheduleRefreshNow();
-      }, ModalityState.nonModal());
-    }
-
-    @RequiresEdt
-    private void refreshViewOnEdt(@NotNull DefaultTreeModel treeModel,
-                                  @NotNull List<? extends LocalChangeList> changeLists,
-                                  @NotNull List<? extends FilePath> unversionedFiles,
-                                  boolean hasPendingRefresh) {
-      if (myDisposed) return;
-
-      Span span = TRACER.spanBuilder(ChangesView.ChangesViewRefreshEdt.getName()).startSpan();
-      try {
-        myView.updateTreeModel(treeModel, new ChangesViewTreeStateStrategy());
-
-        if (myCommitWorkflowHandler != null && !hasPendingRefresh) {
-          myCommitWorkflowHandler.synchronizeInclusion(changeLists, unversionedFiles);
-        }
-      }
-      finally {
-        span.end();
-      }
-    }
-
-    public void setGrouping(@NotNull String groupingKey) {
-      myView.getGroupingSupport().setGroupingKeysOrSkip(Set.of(groupingKey));
-      scheduleRefreshNow();
-    }
-
-    public void selectFile(@Nullable VirtualFile vFile) {
-      if (vFile == null) return;
-
-      ChangesBrowserNode<?> node = findNodeForFile(vFile);
-      if (node == null) return;
-
-      TreeUtil.selectNode(myView, node);
-    }
-
-    public void selectChanges(@NotNull List<? extends Change> changes) {
-      List<TreePath> paths = new ArrayList<>();
-
-      for (Change change : changes) {
-        ContainerUtil.addIfNotNull(paths, myView.findNodePathInTree(change));
-      }
-
-      TreeUtil.selectPaths(myView, paths);
-    }
-
-
-    public void refreshChangesViewNodeAsync(@NotNull VirtualFile file) {
-      invokeLater(() -> refreshChangesViewNode(file));
-    }
-
-    private void refreshChangesViewNode(@NotNull VirtualFile file) {
-      ChangesBrowserNode<?> node = findNodeForFile(file);
-      if (node == null) return;
-
-      myView.getModel().nodeChanged(node);
-    }
-
-    private @Nullable ChangesBrowserNode<?> findNodeForFile(@NotNull VirtualFile file) {
-      FilePath filePath = VcsUtil.getFilePath(file);
-      DefaultMutableTreeNode root = (DefaultMutableTreeNode)myView.getModel().getRoot();
-      return (ChangesBrowserNode<?>)TreeUtil.findNode(root, node -> {
-        FilePath nodeFilePath = VcsTreeModelData.mapUserObjectToFilePath(node.getUserObject());
-        return Objects.equals(filePath, nodeFilePath);
-      });
-    }
-
-    private void invokeLater(Runnable runnable) {
-      ApplicationManager.getApplication().invokeLater(runnable, ModalityState.nonModal(), myProject.getDisposed());
-    }
-
     private void invokeLaterIfNeeded(Runnable runnable) {
       ModalityUiUtil.invokeLaterIfNeeded(ModalityState.nonModal(), myProject.getDisposed(), runnable);
-    }
-
-    private class MyChangeListListener extends ChangeListAdapter {
-      @Override
-      public void changeListsChanged() {
-        scheduleRefresh();
-      }
-
-      @Override
-      public void unchangedFileStatusChanged() {
-        scheduleRefresh();
-      }
-
-      @Override
-      public void changedFileStatusChanged() {
-        setBusy(false);
-        scheduleRefresh();
-
-        ChangeListManagerImpl changeListManager = ChangeListManagerImpl.getInstanceImpl(myProject);
-        updateProgressComponent(changeListManager.getAdditionalUpdateInfo());
-      }
-    }
-
-    public interface Listener extends EventListener {
-      void allowExcludeFromCommitChanged();
     }
   }
 
@@ -862,5 +500,10 @@ public class ChangesViewManager implements ChangesViewEx, Disposable {
   @Override
   public @Nullable ChangesViewCommitWorkflowHandler getCommitWorkflowHandler() {
     return ChangesViewWorkflowManager.getInstance(myProject).getCommitWorkflowHandler();
+  }
+
+  @ApiStatus.Internal
+  public @Nullable ChangesViewProxy getChangesView() {
+    return myChangesView;
   }
 }

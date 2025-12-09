@@ -18,9 +18,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.serialization.json.Json
-import fleet.multiplatform.shims.ConcurrentHashMap
-import fleet.multiplatform.shims.ConcurrentHashSet
+import fleet.multiplatform.shims.MultiplatformConcurrentHashMap
+import fleet.multiplatform.shims.MultiplatformConcurrentHashSet
 import fleet.util.async.withSupervisor
+import kotlinx.serialization.builtins.serializer
 import kotlin.coroutines.EmptyCoroutineContext
 
 class RpcExecutor private constructor(
@@ -32,10 +33,10 @@ class RpcExecutor private constructor(
   private val rpcCallDispatcher: CoroutineDispatcher?,
 ) {
 
-  private val remoteObjects = ConcurrentHashMap<InstanceId, ServiceImplementation>()
-  private val resources = ConcurrentHashMap<InstanceId, Job>()
-  private val children: ConcurrentHashMap<InstanceId, Set<InstanceId>> = ConcurrentHashMap()
-  private val parents: ConcurrentHashMap<InstanceId, InstanceId> = ConcurrentHashMap()
+  private val remoteObjects = MultiplatformConcurrentHashMap<InstanceId, ServiceImplementation>()
+  private val resources = MultiplatformConcurrentHashMap<InstanceId, Job>()
+  private val children: MultiplatformConcurrentHashMap<InstanceId, Set<InstanceId>> = MultiplatformConcurrentHashMap()
+  private val parents: MultiplatformConcurrentHashMap<InstanceId, InstanceId> = MultiplatformConcurrentHashMap()
 
   companion object {
     internal val logger = KLoggers.logger(RpcExecutor::class)
@@ -99,10 +100,10 @@ class RpcExecutor private constructor(
     }
   }
 
-  private val requestJobs = ConcurrentHashMap<UID, CompletableJob>()
-  private val routeRequests = ConcurrentHashMap<UID/*route*/, MutableSet<UID/*requestId*/>>()
-  private val channels = ConcurrentHashMap<UID, InternalStreamDescriptor>()
-  private val routeChannels = ConcurrentHashMap<UID/*route*/, MutableSet<UID/*channelId*/>>()
+  private val requestJobs = MultiplatformConcurrentHashMap<UID, CompletableJob>()
+  private val routeRequests = MultiplatformConcurrentHashMap<UID/*route*/, MultiplatformConcurrentHashSet<UID/*requestId*/>>()
+  private val channels = MultiplatformConcurrentHashMap<UID, InternalStreamDescriptor>()
+  private val routeChannels = MultiplatformConcurrentHashMap<UID/*route*/, MultiplatformConcurrentHashSet<UID/*channelId*/>>()
 
   private suspend fun send(message: TransportMessage) {
     sendSuspend(::sendAsync, message)
@@ -148,9 +149,13 @@ class RpcExecutor private constructor(
         }
         catch (ex: Throwable) {
           logger.trace(ex) { "Failed to build arguments for $message" }
-          send(RpcMessage.CallFailure(message.requestId,
-                                      FailureInfo(requestError = "Invalid arguments for ${message.classMethodDisplayName()}: ${ex}"))
-                 .seal(destination = clientId, origin = route))
+          val msg = RpcMessage.CallFailure(
+            requestId = message.requestId,
+            error = FailureInfo(
+              requestError = "Invalid arguments for ${message.classMethodDisplayName()}: ${ex}"
+            ),
+          ).seal(destination = clientId, origin = route)
+          send(msg)
           return
         }
 
@@ -207,16 +212,24 @@ class RpcExecutor private constructor(
                 Json.encodeToJsonElement(InstanceId.serializer(), remoteObjectId)
               }
               else {
-                val (resultSerialized, streamDescriptors) = withSerializationContext("Result of ${message.displayName}", null, serviceScope) {
-                  val kserializer = returnType.serializer(message.classMethodDisplayName())
-                  json.encodeToJsonElement(kserializer, result)
+                // tail call optimization might pass our continuation to whatever function was last in the method and we will get its return value
+                // usually kotlin will ignore it and replace with Unit, but because we are invoking an abstract lambda it gets confused
+                // TODO not the best approach, obviously, but it works without changes in the compiler plugin
+                if (returnType is RemoteKind.Data && returnType.serializer == Unit.serializer()) {
+                  json.encodeToJsonElement(Unit.serializer(), Unit)
                 }
+                else {
+                  val (resultSerialized, streamDescriptors) = withSerializationContext("Result of ${message.displayName}", null, serviceScope) {
+                    val kserializer = returnType.serializer(message.classMethodDisplayName())
+                    json.encodeToJsonElement(kserializer, result)
+                  }
 
-                streamDescriptors.forEach {
-                  registeredStreams.add(registerStream(serviceScope, it, clientId))
+                  streamDescriptors.forEach {
+                    registeredStreams.add(registerStream(serviceScope, it, clientId))
+                  }
+
+                  resultSerialized
                 }
-
-                resultSerialized
               }
 
               logger.trace { "Sending result: requestId=${request.requestId}, result=$result" }
@@ -233,9 +246,11 @@ class RpcExecutor private constructor(
           }
           catch (e: Throwable) {
             logger.trace { "Sending call failure: requestId=${message.requestId}, error=${e.message}" }
-            send(RpcMessage.CallFailure(requestId = message.requestId,
-                                        error = e.toFailureInfo())
-                   .seal(destination = clientId, origin = route))
+            val msg = RpcMessage.CallFailure(
+              requestId = message.requestId,
+              error = e.toFailureInfo(),
+            ).seal(destination = clientId, origin = route)
+            send(msg)
             // todo removeREquest ... completeExceptionally()
           }
 
@@ -327,7 +342,7 @@ class RpcExecutor private constructor(
     require(previous == null) {
       "There is no way you can use the same channel twice ${descriptor.displayName}"
     }
-    routeChannels.computeIfAbsent(route) { ConcurrentHashSet() }.add(descriptor.uid)
+    routeChannels.computeIfAbsent(route) { MultiplatformConcurrentHashSet() }.add(descriptor.uid)
     return registeredStream
   }
 
@@ -337,7 +352,7 @@ class RpcExecutor private constructor(
     route: UID?,
   ) {
     requestJobs[requestId] = requestJob
-    if (route != null) routeRequests.computeIfAbsent(route) { ConcurrentHashSet() }.add(requestId)
+    if (route != null) routeRequests.computeIfAbsent(route) { MultiplatformConcurrentHashSet() }.add(requestId)
   }
 
   private fun removeRequest(requestId: UID, route: UID?, jobAction: CompletableJob.() -> Unit) {

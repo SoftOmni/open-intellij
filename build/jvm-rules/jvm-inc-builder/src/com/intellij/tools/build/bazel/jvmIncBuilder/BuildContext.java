@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface BuildContext extends DiagnosticSink {
+
   String getTargetName();
 
   boolean isRebuild();
@@ -35,6 +36,9 @@ public interface BuildContext extends DiagnosticSink {
   
   @Nullable
   Path getAbiOutputZip();
+
+  @Nullable
+  Path getKotlinCriStoragePath();
 
   NodeSourceSnapshot getSources();
 

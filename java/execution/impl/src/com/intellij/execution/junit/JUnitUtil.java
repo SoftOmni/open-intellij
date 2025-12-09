@@ -12,8 +12,10 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
@@ -22,6 +24,7 @@ import com.intellij.testIntegration.JavaTestFramework;
 import com.intellij.testIntegration.TestFramework;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.siyeh.ig.junit.JUnitCommonClassNames;
 import com.siyeh.ig.psiutils.TestUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 
 import static com.intellij.codeInsight.AnnotationUtil.CHECK_HIERARCHY;
+import static com.siyeh.ig.junit.JUnitCommonClassNames.ORG_JUNIT_JUPITER_API_METHOD_ORDERER_DEFAULT;
 
 public final class JUnitUtil {
   public static final String TEST_CASE_CLASS = "junit.framework.TestCase";
@@ -72,8 +76,9 @@ public final class JUnitUtil {
   private static final List<String> STATIC_5_CONFIGS = Arrays.asList(BEFORE_ALL_ANNOTATION_NAME, AFTER_ALL_ANNOTATION_NAME);
 
   private static final Collection<String> CONFIGURATIONS_ANNOTATION_NAME =
-    List.of(DATA_POINT, AFTER_ANNOTATION_NAME, BEFORE_ANNOTATION_NAME, AFTER_CLASS_ANNOTATION_NAME, BEFORE_CLASS_ANNOTATION_NAME,
-            BEFORE_ALL_ANNOTATION_NAME, AFTER_ALL_ANNOTATION_NAME, RULE_ANNOTATION);
+    List.of(DATA_POINT, AFTER_ANNOTATION_NAME, BEFORE_ANNOTATION_NAME, AFTER_EACH_ANNOTATION_NAME, BEFORE_EACH_ANNOTATION_NAME,
+            AFTER_CLASS_ANNOTATION_NAME, BEFORE_CLASS_ANNOTATION_NAME, BEFORE_ALL_ANNOTATION_NAME, AFTER_ALL_ANNOTATION_NAME, RULE_ANNOTATION,
+            JUnitCommonClassNames.ORG_JUNIT_PLATFORM_SUITE_API_AFTERSUITE, JUnitCommonClassNames.ORG_JUNIT_PLATFORM_SUITE_API_BEFORESUITE);
 
   public static final String PARAMETERIZED_CLASS_NAME = "org.junit.runners.Parameterized";
   public static final String SUITE_CLASS_NAME = "org.junit.runners.Suite";
@@ -132,10 +137,10 @@ public final class JUnitUtil {
     if (psiMethod.isConstructor()) return false;
     if (psiMethod.hasModifierProperty(PsiModifier.PRIVATE)) return false;
     if (isTestAnnotated(psiMethod, true)) return !psiMethod.hasModifierProperty(PsiModifier.STATIC);
+    if (AnnotationUtil.isAnnotated(psiMethod, CONFIGURATIONS_ANNOTATION_NAME, 0)) return false;
     if (aClass != null && MetaAnnotationUtil.isMetaAnnotatedInHierarchy(aClass, Collections.singletonList(CUSTOM_TESTABLE_ANNOTATION))) return true;
     if (!psiMethod.hasModifierProperty(PsiModifier.PUBLIC)) return false;
     if (psiMethod.hasModifierProperty(PsiModifier.ABSTRACT)) return false;
-    if (AnnotationUtil.isAnnotated(psiMethod, CONFIGURATIONS_ANNOTATION_NAME, 0)) return false;
     if (checkClass && checkRunWith) {
       PsiAnnotation annotation = getRunWithAnnotation(aClass);
       if (annotation != null) {
@@ -361,8 +366,20 @@ public final class JUnitUtil {
     return isJUnit5(element.getResolveScope(), element.getProject());
   }
 
-  public static boolean isJUnit5(GlobalSearchScope scope, Project project) {
+  public static boolean isJUnit5(@NotNull GlobalSearchScope scope, @NotNull Project project) {
     return hasPackageWithDirectories(JavaPsiFacade.getInstance(project), TEST5_PACKAGE_FQN, scope);
+  }
+
+  public static boolean isJUnit6(@NotNull GlobalSearchScope scope, @NotNull Project project) {
+    return ReadAction.nonBlocking(() -> {
+      DumbService dumbService = DumbService.getInstance(project);
+      ThrowableComputable<Boolean, RuntimeException> computable =
+        () -> JavaPsiFacade.getInstance(project).findClass(ORG_JUNIT_JUPITER_API_METHOD_ORDERER_DEFAULT, scope) != null;
+
+      return dumbService.isAlternativeResolveEnabled()
+             ? computable.compute()
+             : dumbService.computeWithAlternativeResolveEnabled(computable);
+    }).executeSynchronously();
   }
 
   public static boolean hasPackageWithDirectories(JavaPsiFacade facade, String packageQName, GlobalSearchScope globalSearchScope) {

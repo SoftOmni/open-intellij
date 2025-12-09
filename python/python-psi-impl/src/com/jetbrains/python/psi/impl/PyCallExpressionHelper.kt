@@ -84,30 +84,44 @@ fun PyCallExpression.resolveCalleeClass(): PyClass? {
  * please obtain its result via [TypeEvalContext.getType] with `call.getCallee()` as an argument.
  */
 fun PyCallExpression.getCalleeType(resolveContext: PyResolveContext): PyType? {
-  val callableTypes = mutableListOf<PyType?>()
-  val context = resolveContext.typeEvalContext
 
   val results = PyUtil.filterTopPriorityResults(
     callee
       .multipleResolveCallee(resolveContext)
-      .forEveryScopeTakeOverloadsOtherwiseImplementations(context) { it.element }
+      .forEveryScopeTakeOverloadsOtherwiseImplementations(resolveContext.typeEvalContext) { it.element }
   )
 
+  val callableTypes = mutableListOf<PyType?>()
   for (resolveResult in results) {
     val element = resolveResult.element
-    if (element != null) {
-      val typeFromProviders =
-        Ref.deref(PyReferenceExpressionImpl.getReferenceTypeFromProviders(element, resolveContext.typeEvalContext, this))
+    val clarified = resolveResult.clarifyResolveResult(resolveContext)
 
-      if (PyTypeUtil.toStream(typeFromProviders).allMatch { it is PyCallableType }) {
-        PyTypeUtil.toStream(typeFromProviders).forEachOrdered { callableTypes.add(it) }
-        continue
+    val typeFromProviders = if (element != null) {
+      val typeFromProviders =
+        PyReferenceExpressionImpl.getReferenceTypeFromProviders(element, resolveContext.typeEvalContext, this)
+
+      typeFromProviders?.get()
+    }
+    else {
+      null
+    }
+
+    val result = mutableListOf<PyType?>()
+    if (clarified != null) {
+      PyTypeUtil.toStream(typeFromProviders).forEach {
+        ContainerUtil.addIfNotNull<PyCallableType?>(result, toCallableType(clarified, it, resolveContext.typeEvalContext))
+      }
+
+      if (result.isEmpty()) {
+        val clarifiedResolved = clarified.clarifiedResolved as? PyTypedElement ?: continue
+        ContainerUtil.addIfNotNull<PyCallableType?>(
+          result,
+          toCallableType(clarified, resolveContext.typeEvalContext.getType(clarifiedResolved), resolveContext.typeEvalContext)
+        )
       }
     }
 
-    for (clarifiedResolveResult in resolveResult.clarifyResolveResult(resolveContext)) {
-      ContainerUtil.addIfNotNull<PyCallableType?>(callableTypes, toCallableType(clarifiedResolveResult, context))
-    }
+    callableTypes.addAll(result)
   }
 
   return PyUnionType.union(callableTypes)
@@ -131,9 +145,9 @@ fun PyCallExpression.multipleResolveCallee(resolveContext: PyResolveContext): Li
   return PyUtil.getParameterizedCachedValue(
     this,
     resolveContext) {
-      getExplicitResolveResults(it) +
-      getImplicitResolveResults(it) +
-      getRemoteResolveResults(it)
+    getExplicitResolveResults(it) +
+    getImplicitResolveResults(it) +
+    getRemoteResolveResults(it)
   }
 }
 
@@ -156,13 +170,21 @@ private fun PyCallExpression.getExplicitResolveResults(resolveContext: PyResolve
   val calleeType = context.getType(callee)
 
   val provided = PyTypeProvider.EP_NAME.extensionList.mapNotNull { it.prepareCalleeTypeForCall(calleeType, this, context) }
-  if (!provided.isEmpty())
+  if (!provided.isEmpty()) {
     return provided.mapNotNull { Ref.deref(it) }
+  }
 
   val result = mutableListOf<PyCallableType>()
 
   for (type in PyTypeUtil.toStream(calleeType)) {
-    if (type is PyClassType) {
+    // When invoking cls(), turn type[Self] into Self.
+    // Otherwise, we will delegate to __init__() of its scope class and return a concrete type class
+    // as a call result, losing Self. 
+    // See e.g. Py3TypeCheckerInspectionTest.testSelfInClassMethods
+    if (type is PySelfType) {
+      result.add(type)
+    }
+    else if (type is PyClassType) {
       val implicitlyInvokedMethods = type
         .resolveImplicitlyInvokedMethods(this, resolveContext)
         .forEveryScopeTakeOverloadsOtherwiseImplementations(context)
@@ -232,7 +254,7 @@ private fun PyExpression?.multipleResolveCallee(resolveContext: PyResolveContext
   }
 }
 
-private fun QualifiedRatedResolveResult.clarifyResolveResult(resolveContext: PyResolveContext): List<ClarifiedResolveResult> {
+private fun QualifiedRatedResolveResult.clarifyResolveResult(resolveContext: PyResolveContext): ClarifiedResolveResult? {
   val resolved = element
 
   if (resolved is PyCallExpression) { // foo = classmethod(foo)
@@ -248,8 +270,7 @@ private fun QualifiedRatedResolveResult.clarifyResolveResult(resolveContext: PyR
         else
           null
 
-      val result = ClarifiedResolveResult(this, wrapperInfo.second, wrappedModifier, false)
-      return listOf(result)
+      return ClarifiedResolveResult(this, wrapperInfo.second, wrappedModifier, false)
     }
   }
   else if (resolved is PyFunction) {
@@ -258,22 +279,21 @@ private fun QualifiedRatedResolveResult.clarifyResolveResult(resolveContext: PyR
     if (resolved.property != null && resolved.isQualifiedByInstance(qualifiers, context)) {
       val type = context.getReturnType(resolved)
 
-      return if (type is PyFunctionType) listOf(
-        ClarifiedResolveResult(this, type.callable, null, false))
-      else emptyList()
+      return if (type is PyFunctionType) ClarifiedResolveResult(this, type.callable, null, false) else null
     }
   }
 
-  return if (resolved != null) listOf(
-    ClarifiedResolveResult(this, resolved, null, resolved is PyClass))
-  else emptyList()
+  return if (resolved != null) ClarifiedResolveResult(this, resolved, null, resolved is PyClass) else null
 }
 
-private fun PyCallSiteExpression.toCallableType(resolveResult: ClarifiedResolveResult, context: TypeEvalContext): PyCallableType? {
+private fun PyCallSiteExpression.toCallableType(
+  resolveResult: ClarifiedResolveResult,
+  inferredType: PyType?,
+  context: TypeEvalContext,
+): PyCallableType? {
   val clarifiedResolved = resolveResult.clarifiedResolved as? PyTypedElement ?: return null
 
-  val callableType = context.getType(clarifiedResolved) as? PyCallableType
-                     ?: return null
+  val callableType = inferredType as? PyCallableType ?: return null
 
   if (clarifiedResolved is PyCallable) {
     val originalModifier = if (clarifiedResolved is PyFunction) clarifiedResolved.modifier else null
@@ -593,6 +613,12 @@ private fun PyCallExpression.getSuperCallType(context: TypeEvalContext): Maybe<P
     if (possible_class is PyClass && possible_class.isNewStyleClass(context)) {
       return Maybe(getSuperCallTypeForArguments(context, possible_class, args[1]))
     }
+    if (possible_class is PyNamedParameter) {
+      val paramType = context.getType(possible_class)
+      if (paramType is PyClassType) {
+        return Maybe(getSuperCallTypeForArguments(context, paramType.pyClass, args[1]))
+      }
+    }
   }
   else if ((containingFile as? PyFile)?.languageLevel?.isPy3K == true && containingClass != null) {
     return Maybe(containingClass.getSuperClassUnionType(context))
@@ -603,7 +629,7 @@ private fun PyCallExpression.getSuperCallType(context: TypeEvalContext): Maybe<P
 private fun getSuperCallTypeForArguments(context: TypeEvalContext, firstClass: PyClass, second_arg: PyExpression?): PyType? {
   // check 2nd argument, too; it should be an instance
   if (second_arg != null) {
-    val second_type = context.getType(second_arg)
+    val second_type = context.getType(second_arg);
     if (second_type is PyClassType) {
       // imitate isinstance(second_arg, possible_class)
       val secondClass = second_type.pyClass
@@ -613,9 +639,9 @@ private fun getSuperCallTypeForArguments(context: TypeEvalContext, firstClass: P
       if (secondClass.isSubclass(firstClass, context)) {
         val nextAfterFirstInMro =
           secondClass.getAncestorClasses(context)
-          .dropWhile { it !== firstClass }
-          .drop(1)
-          .firstOrNull()
+            .dropWhile { it !== firstClass }
+            .drop(1)
+            .firstOrNull()
 
         if (nextAfterFirstInMro != null) {
           return PyClassTypeImpl(nextAfterFirstInMro, false)
@@ -812,12 +838,11 @@ fun PyClassType.resolveImplicitlyInvokedMethods(
   else resolveDunderCall(callSite, resolveContext)
 }
 
-fun PyClassType.getImplicitlyInvokedMethodTypes(
-  callSite: PyCallSiteExpression?,
+fun PyClassType.getImplicitlyInvokedMethod(
   resolveContext: PyResolveContext,
-): List<PyTypedResolveResult> {
-  return if (isDefinition()) getConstructorTypes(callSite, resolveContext)
-  else getDunderCallType(callSite, resolveContext)
+): List<PyTypeMember> {
+  return if (isDefinition()) getConstructorTypes(resolveContext)
+  else getDunderCallType(resolveContext)
 }
 
 private fun PyClassType.changeToImplicitlyInvokedMethods(
@@ -835,7 +860,10 @@ private fun PyClassType.changeToImplicitlyInvokedMethods(
         PyUtil.isInitOrNewMethod(it)
       )
     }
-    .mapNotNull { call.toCallableType(it, context) }
+    .mapNotNull {
+      val clarifiedResolved = it.clarifiedResolved as? PyTypedElement ?: return@mapNotNull null
+      call.toCallableType(it, context.getType(clarifiedResolved), context)
+    }
 }
 
 private fun PyClassType.resolveConstructors(callSite: PyCallSiteExpression?, resolveContext: PyResolveContext): List<RatedResolveResult> {
@@ -866,15 +894,15 @@ private fun PyClassType.resolveConstructors(callSite: PyCallSiteExpression?, res
   return initAndNew.preferInitOverNew().map { RatedResolveResult(PyReferenceImpl.getRate(it, context), it) }
 }
 
-private fun PyClassType.getConstructorTypes(callSite: PyCallSiteExpression?, resolveContext: PyResolveContext): List<PyTypedResolveResult> {
-  val initTypes = getMemberTypes(PyNames.INIT, callSite, AccessDirection.READ, resolveContext)
-  if (initTypes != null) {
-    return initTypes
+private fun PyClassType.getConstructorTypes(resolveContext: PyResolveContext): List<PyTypeMember> {
+  val initFunc = findMember(PyNames.INIT, resolveContext)
+  if (initFunc.isNotEmpty()) {
+    return initFunc
   }
 
-  val newTypes = getMemberTypes(PyNames.NEW, callSite, AccessDirection.READ, resolveContext)
-  if (newTypes != null) {
-    return newTypes
+  val newFunc = findMember(PyNames.NEW, resolveContext)
+  if (newFunc.isNotEmpty()) {
+    return newFunc
   }
 
   return emptyList()
@@ -914,7 +942,7 @@ private fun PyClassType.resolveMetaclassDunderCall(
       ?.asSequence()
       ?.map { it.element }
       ?.toSet()
-      ?: emptySet()
+    ?: emptySet()
 
   return results.filter { it.element !in typeDunderCall }
 }
@@ -923,9 +951,11 @@ private fun PyClassLikeType.resolveDunderCall(location: PyExpression?, resolveCo
   return resolveMember(PyNames.CALL, location, AccessDirection.READ, resolveContext) ?: emptyList()
 }
 
-private fun PyClassLikeType.getDunderCallType(location: PyExpression?, resolveContext: PyResolveContext): List<PyTypedResolveResult> {
-  return getMemberTypes(PyNames.CALL, location, AccessDirection.READ, resolveContext) ?: emptyList()
+private fun PyClassLikeType.getDunderCallType(resolveContext: PyResolveContext): List<PyTypeMember> {
+  return findMember(PyNames.CALL, resolveContext)
 }
+
+private fun PyCallableParameter.isLegacyPositionalOnly(): Boolean = !isSelf && isPrivate(name.orEmpty())
 
 fun analyzeArguments(
   arguments: List<PyExpression>,
@@ -933,9 +963,9 @@ fun analyzeArguments(
   context: TypeEvalContext,
 ): ArgumentMappingResults {
   val hasSlashParameter = parameters.any { it.parameter is PySlashParameter }
-  var positionalOnlyMode = hasSlashParameter
-  var seenStarArgs = false
-  var seenSingleStar = false
+  val oldStylePositionalOnly = parameters.dropWhile { it.isSelf }.firstOrNull()?.isLegacyPositionalOnly() ?: false
+  var positionalOnlyMode = hasSlashParameter || oldStylePositionalOnly
+  var keywordOnlyMode = false
   var mappedVariadicArgumentsToParameters = false
   val mappedParameters = LinkedHashMap<PyExpression?, PyCallableParameter?>()
   val unmappedParameters = mutableListOf<PyCallableParameter?>()
@@ -958,6 +988,9 @@ fun analyzeArguments(
 
     if (psi is PyNamedParameter || psi == null) {
       val parameterName = parameter.name
+      if (!parameter.isSelf && !hasSlashParameter && !parameter.isLegacyPositionalOnly()) {
+        positionalOnlyMode = false
+      }
       if (parameter.isPositionalContainer()) {
         for (argument in allPositionalArguments) {
           if (argument != null) {
@@ -972,7 +1005,7 @@ fun analyzeArguments(
         }
         allPositionalArguments.clear()
         variadicPositionalArguments.clear()
-        seenStarArgs = true
+        keywordOnlyMode = true
       }
       else if (parameter.isKeywordContainer()) {
         for (argument in keywordArguments) {
@@ -984,19 +1017,30 @@ fun analyzeArguments(
         keywordArguments.clear()
         variadicKeywordArguments.clear()
       }
-      else if (seenSingleStar) {
-        val keywordArgument: PyExpression? = keywordArguments.removeKeywordArgument(parameterName)
+      else if (keywordOnlyMode) {
+        val keywordArgument = keywordArguments.removeKeywordArgument(parameterName)
         if (keywordArgument != null) {
           mappedParameters.put(keywordArgument, parameter)
         }
-        else if (variadicKeywordArguments.isEmpty()) {
-          if (!parameter.hasDefaultValue()) {
-            unmappedParameters.add(parameter)
-          }
-        }
-        else {
+        else if (!variadicKeywordArguments.isEmpty()) {
           parametersMappedToVariadicKeywordArguments.add(parameter)
           mappedVariadicArgumentsToParameters = true
+        }
+        else if (!parameter.hasDefaultValue()) {
+          unmappedParameters.add(parameter)
+        }
+      }
+      else if (positionalOnlyMode) {
+        val positionalArgument = allPositionalArguments.next()
+        if (positionalArgument != null) {
+          mappedParameters.put(positionalArgument, parameter)
+        }
+        else if (!variadicPositionalArguments.isEmpty()) {
+          parametersMappedToVariadicPositionalArguments.add(parameter)
+          mappedVariadicArgumentsToParameters = true
+        }
+        else if (!parameter.hasDefaultValue()) {
+          unmappedParameters.add(parameter)
         }
       }
       else if (parameter.isParamSpecOrConcatenate(context)) {
@@ -1008,46 +1052,30 @@ fun analyzeArguments(
         variadicPositionalArguments.clear()
         variadicKeywordArguments.clear()
       }
+      else if (!allPositionalArguments.isEmpty()) {
+        val positionalArgument = allPositionalArguments.next()
+        assert(positionalArgument != null)
+        mappedParameters.put(positionalArgument, parameter)
+        if (positionalComponentsOfVariadicArguments.contains(positionalArgument)) {
+          parametersMappedToVariadicPositionalArguments.add(parameter)
+        }
+      }
       else {
-        if (positionalOnlyMode) {
-          val positionalArgument = allPositionalArguments.next()
-
-          if (positionalArgument != null) {
-            mappedParameters.put(positionalArgument, parameter)
-          }
-          else if (!parameter.hasDefaultValue()) {
-            unmappedParameters.add(parameter)
-          }
+        val keywordArgument = keywordArguments.removeKeywordArgument(parameterName)
+        if (keywordArgument != null) {
+          mappedParameters.put(keywordArgument, parameter)
         }
-        else if (allPositionalArguments.isEmpty()) {
-          val keywordArgument = keywordArguments.removeKeywordArgument(parameterName)
-          if (keywordArgument != null && !(!hasSlashParameter && !seenStarArgs && parameterName != null && isPrivate(parameterName))) {
-            mappedParameters.put(keywordArgument, parameter)
+        else if (!variadicPositionalArguments.isEmpty() || !variadicKeywordArguments.isEmpty()) {
+          if (!variadicPositionalArguments.isEmpty()) {
+            parametersMappedToVariadicPositionalArguments.add(parameter)
           }
-          else if (variadicPositionalArguments.isEmpty() && variadicKeywordArguments.isEmpty() && !parameter.hasDefaultValue()) {
-            unmappedParameters.add(parameter)
+          if (!variadicKeywordArguments.isEmpty()) {
+            parametersMappedToVariadicKeywordArguments.add(parameter)
           }
-          else {
-            if (!variadicPositionalArguments.isEmpty()) {
-              parametersMappedToVariadicPositionalArguments.add(parameter)
-            }
-            if (!variadicKeywordArguments.isEmpty()) {
-              parametersMappedToVariadicKeywordArguments.add(parameter)
-            }
-            mappedVariadicArgumentsToParameters = true
-          }
+          mappedVariadicArgumentsToParameters = true
         }
-        else {
-          val positionalArgument = allPositionalArguments.next()
-          if (positionalArgument != null) {
-            mappedParameters.put(positionalArgument, parameter)
-            if (positionalComponentsOfVariadicArguments.contains(positionalArgument)) {
-              parametersMappedToVariadicPositionalArguments.add(parameter)
-            }
-          }
-          else if (!parameter.hasDefaultValue()) {
-            unmappedParameters.add(parameter)
-          }
+        else if (!parameter.hasDefaultValue()) {
+          unmappedParameters.add(parameter)
         }
       }
     }
@@ -1073,7 +1101,7 @@ fun analyzeArguments(
       positionalOnlyMode = false
     }
     else if (psi is PySingleStarParameter) {
-      seenSingleStar = true
+      keywordOnlyMode = true
     }
     else if (!parameter.hasDefaultValue()) {
       unmappedParameters.add(parameter)

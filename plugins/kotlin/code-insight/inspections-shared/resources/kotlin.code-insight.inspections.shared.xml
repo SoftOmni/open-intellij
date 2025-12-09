@@ -1,8 +1,5 @@
 <idea-plugin package="org.jetbrains.kotlin.idea.codeInsight.inspections.shared">
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService
-            serviceInterface="org.jetbrains.kotlin.idea.codeinsights.impl.base.KotlinInspectionFacade"
-            serviceImplementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.KotlinInspectionFacadeImpl"/>
 
     <codeInsight.blockingMethodChecker
             implementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.blockingCallsDetection.CoroutineBlockingMethodChecker"/>
@@ -601,6 +598,14 @@
                      language="kotlin"
                      key="inspection.suspend.coroutine.lacks.cancellation.guarantees.display.name" bundle="messages.KotlinBundle"/>
 
+    <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.coroutines.CoroutineContextWithJobInspection"
+                     groupPath="Kotlin"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.coroutine"
+                     enabledByDefault="true"
+                     level="WARNING"
+                     language="kotlin"
+                     key="inspection.coroutine.context.with.job.display.name" bundle="messages.KotlinBundle"/>
+
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.RedundantEnumConstructorInvocationInspection"
                      groupPath="Kotlin"
                      groupBundle="messages.KotlinBundle" groupKey="group.names.redundant.constructs"
@@ -616,6 +621,14 @@
                      level="WEAK WARNING"
                      language="kotlin"
                      key="inspection.suspicious.equals.combination.display.name" bundle="messages.KotlinBundle"/>
+
+    <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.SuspiciousJavaClassCallableReferenceInspection"
+                     groupPath="Kotlin"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.probable.bugs"
+                     enabledByDefault="true"
+                     level="WARNING"
+                     language="kotlin"
+                     key="inspection.suspicious.javaClass.callable.reference.name" bundle="messages.KotlinBundle"/>
 
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.ReplaceAssertBooleanWithAssertEqualityInspection"
                      groupPath="Kotlin"
@@ -753,7 +766,6 @@
                      groupBundle="messages.KotlinBundle" groupKey="group.names.style.issues"
                      enabledByDefault="true"
                      level="INFORMATION"
-                     editorAttributes="NOT_USED_ELEMENT_ATTRIBUTES"
                      language="kotlin"
                      key="inspection.remove.unnecessary.parentheses.display.name" bundle="messages.KotlinBundle"/>
 
@@ -773,5 +785,13 @@
                      level="INFORMATION"
                      language="kotlin"
                      key="inspection.replace.addAll.with.mapTo.display.name" bundle="messages.KotlinBundle"/>
+
+    <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.ImplicitNullableNothingTypeInspection"
+                     groupPath="Kotlin"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.probable.bugs"
+                     enabledByDefault="true"
+                     level="WEAK WARNING"
+                     language="kotlin"
+                     key="inspection.implicit.nullable.nothing.type.display.name" bundle="messages.KotlinBundle"/>
   </extensions>
 </idea-plugin>

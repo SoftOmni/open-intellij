@@ -33,6 +33,7 @@ import org.jetbrains.kotlin.idea.base.test.IgnoreTests
 import org.jetbrains.kotlin.idea.intentions.computeOnBackground
 import org.jetbrains.kotlin.idea.quickfix.utils.findInspectionFile
 import org.jetbrains.kotlin.idea.test.*
+import org.jetbrains.kotlin.idea.test.k1DiagnosticsProvider
 import org.jetbrains.kotlin.idea.util.application.executeCommand
 import org.jetbrains.kotlin.psi.KtFile
 import java.io.File
@@ -288,7 +289,7 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
     }
 
     protected open fun checkForUnexpectedErrors(file: KtFile) {
-        DirectiveBasedActionUtils.checkForUnexpectedErrors(file)
+        DirectiveBasedActionUtils.checkForUnexpectedErrors(file, DirectiveBasedActionUtils.ERROR_DIRECTIVE, k1DiagnosticsProvider)
     }
 
     protected open fun checkAvailableActionsAreExpected(file: File, actions: Collection<IntentionAction>) {
@@ -386,10 +387,19 @@ abstract class AbstractQuickFixMultiFileTest : KotlinLightCodeInsightFixtureTest
                 CodeInsightTestFixtureImpl.invokeIntention(action, psiFile, editor)
 
                 if (!shouldBeAvailableAfterExecution) {
-                    val afterAction = pattern.findActionByPattern(getAvailableActions(), acceptMatchByFamilyName = true)
+                    val afterActions = pattern.findActionsByPattern(getAvailableActions(), acceptMatchByFamilyName = true)
 
-                    if (afterAction != null) {
-                        TestCase.fail("Action '$text' is still available after its invocation in test $testFilePath")
+                    if (afterActions.isNotEmpty()) {
+                        val plural = afterActions.size > 1
+                        val afterActionsText = afterActions.joinToString { "'" + it.text + "'" }
+                        TestCase.assertFalse(
+                            "Action" +
+                                    ("s".takeIf { plural } ?: "") +
+                                    " $afterActionsText " +
+                                    ("are".takeIf { plural } ?: "is") +
+                                    " still available after its invocation in test $testFilePath",
+                            afterActionsText == "'$text'"
+                        )
                     }
                 }
             }

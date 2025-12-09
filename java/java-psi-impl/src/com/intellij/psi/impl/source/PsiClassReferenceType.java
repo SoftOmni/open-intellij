@@ -42,8 +42,14 @@ public class PsiClassReferenceType extends PsiClassType.Stub {
   }
 
   PsiClassReferenceType(@NotNull ClassReferencePointer reference, LanguageLevel level, @NotNull TypeAnnotationProvider provider) {
+    this(reference, level, provider, null);
+  }
+
+  private PsiClassReferenceType(@NotNull ClassReferencePointer reference, LanguageLevel level, @NotNull TypeAnnotationProvider provider,
+                        @Nullable TypeNullability nullability) {
     super(level, provider);
     myReference = reference;
+    myNullability = nullability;
   }
 
   private static PsiAnnotation @NotNull [] collectAnnotations(PsiJavaCodeReferenceElement reference) {
@@ -142,11 +148,8 @@ public class PsiClassReferenceType extends PsiClassType.Stub {
 
   @Override
   public @NotNull PsiClassType withNullability(@NotNull TypeNullability nullability) {
-    ClassResolveResult result = resolveGenerics();
-    PsiClass psiClass = result.getElement();
-    if (psiClass == null) return this;
-    return new PsiImmediateClassType(
-      psiClass, result.getSubstitutor(), myLanguageLevel, getAnnotationProvider(), getPsiContext(), nullability);
+    if (myNullability == nullability) return this;
+    return new PsiClassReferenceType(myReference, myLanguageLevel, getAnnotationProvider(), nullability);
   }
 
   @Override
@@ -270,7 +273,8 @@ public class PsiClassReferenceType extends PsiClassType.Stub {
   @Override
   public int getParameterCount() {
     PsiJavaCodeReferenceElement reference = getReference();
-    if (reference.getTypeParameterCount() == 0 &&
+    int count = reference.getTypeParameterCount();
+    if (count == 0 &&
         reference.getParent() instanceof PsiTypeElement &&
         reference.getParent().getParent() instanceof PsiDeconstructionPattern) {
       ClassResolveResult result = resolveGenerics();
@@ -279,7 +283,7 @@ public class PsiClassReferenceType extends PsiClassType.Stub {
         return cls.getTypeParameters().length;
       }
     }
-    return reference.getTypeParameterCount();
+    return count;
   }
 
   @Override

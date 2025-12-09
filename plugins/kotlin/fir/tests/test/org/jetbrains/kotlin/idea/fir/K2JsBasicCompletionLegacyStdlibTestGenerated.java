@@ -734,6 +734,16 @@ public abstract class K2JsBasicCompletionLegacyStdlibTestGenerated extends Abstr
                 runTest("../../completion/testData/basic/common/constructor/MultipleConstructors.kt");
             }
 
+            @TestMetadata("NestedEnum.kt")
+            public void testNestedEnum() throws Exception {
+                runTest("../../completion/testData/basic/common/constructor/NestedEnum.kt");
+            }
+
+            @TestMetadata("NestedObject.kt")
+            public void testNestedObject() throws Exception {
+                runTest("../../completion/testData/basic/common/constructor/NestedObject.kt");
+            }
+
             @TestMetadata("PreferConstructorInReturn.kt")
             public void testPreferConstructorInReturn() throws Exception {
                 runTest("../../completion/testData/basic/common/constructor/PreferConstructorInReturn.kt");
@@ -3877,6 +3887,11 @@ public abstract class K2JsBasicCompletionLegacyStdlibTestGenerated extends Abstr
                 runTest("../../completion/testData/basic/common/NoEnumMembersFromImplicitQualifier.kt");
             }
 
+            @TestMetadata("NoExtensionForNull.kt")
+            public void testNoExtensionForNull() throws Exception {
+                runTest("../../completion/testData/basic/common/NoExtensionForNull.kt");
+            }
+
             @TestMetadata("NoExtensionsAfterQualifier.kt")
             public void testNoExtensionsAfterQualifier() throws Exception {
                 runTest("../../completion/testData/basic/common/NoExtensionsAfterQualifier.kt");
@@ -4134,6 +4149,21 @@ public abstract class K2JsBasicCompletionLegacyStdlibTestGenerated extends Abstr
 
             private void runTest(String testDataFilePath) throws Exception {
                 KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+            }
+
+            @TestMetadata("ContextParameter.kt")
+            public void testContextParameter() throws Exception {
+                runTest("../../completion/testData/basic/common/variableNameAndType/ContextParameter.kt");
+            }
+
+            @TestMetadata("ContextParameterOnProperty.kt")
+            public void testContextParameterOnProperty() throws Exception {
+                runTest("../../completion/testData/basic/common/variableNameAndType/ContextParameterOnProperty.kt");
+            }
+
+            @TestMetadata("ContextReceiver.kt")
+            public void testContextReceiver() throws Exception {
+                runTest("../../completion/testData/basic/common/variableNameAndType/ContextReceiver.kt");
             }
 
             @TestMetadata("Lateinit.kt")

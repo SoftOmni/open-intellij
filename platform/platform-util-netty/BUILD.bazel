@@ -10,12 +10,12 @@ jvm_library(
     "@lib//:kotlin-stdlib",
     "//platform/core-api:core",
     "//libraries/guava",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "@lib//:netty-buffer",
     "//platform/util",
     "@lib//:netty-codec-http",
     "//platform/platform-util-io:ide-util-io",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/coroutines/core",
   ]
 )
 ### auto-generated section `build intellij.platform.ide.util.netty` end

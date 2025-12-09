@@ -43,12 +43,14 @@ jvm_library(
     "//platform/external-system-api:externalSystem",
     "//jvm/jvm-analysis-api:analysis",
     "//jvm/jvm-analysis-quickFix:analysis-quickFix",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/platform-util-io:ide-util-io",
     "//java/java-impl-refactorings:impl-refactorings",
     "//platform/util/jdom",
     "//plugins/properties/properties-psi-impl:backend-psi",
     "//platform/core-ui",
+    "//platform/execution",
+    "//platform/forms_rt:java-guiForms-rt",
   ],
   exports = ["//jvm/jvm-analysis-api:analysis"]
 )

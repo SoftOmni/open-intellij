@@ -36,14 +36,15 @@ jvm_library(
     "//platform/testFramework:testFramework_test_lib",
     "//platform/workspace/storage/testEntities:testEntities_test_lib",
     "//libraries/guava",
-    "@lib//:kotlin-reflect",
-    "@lib//:fastutil-min",
+    "//libraries/kotlin/reflect",
+    "//libraries/fastutil",
     "//platform/analysis-api:analysis",
     "@lib//:kotlin-test",
-    "@lib//:kryo5",
+    "//libraries/kryo5",
     "//platform/testFramework/junit5",
     "//platform/testFramework/junit5:junit5_test_lib",
-    "@lib//:kotlinx-collections-immutable",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
+    "@lib//:jet_check",
   ]
 )
 ### auto-generated section `build intellij.platform.workspace.storage.tests` end

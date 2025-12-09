@@ -2,15 +2,16 @@
 package com.intellij.tests;
 
 import com.intellij.tests.bazel.BazelJUnitOutputListener;
+import com.intellij.tests.bazel.IjSmTestExecutionListener;
 import com.intellij.tests.bazel.bucketing.BucketsPostDiscoveryFilter;
 import org.junit.platform.engine.DiscoverySelector;
 import org.junit.platform.engine.Filter;
 import org.junit.platform.engine.FilterResult;
 import org.junit.platform.engine.TestEngine;
-import org.junit.platform.engine.TestExecutionResult;
 import org.junit.platform.engine.discovery.ClassNameFilter;
 import org.junit.platform.engine.discovery.DiscoverySelectors;
 import org.junit.platform.engine.discovery.MethodSelector;
+import org.junit.platform.engine.discovery.UniqueIdSelector;
 import org.junit.platform.launcher.*;
 import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
 import org.junit.platform.launcher.core.LauncherFactory;
@@ -26,6 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectMethod;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
@@ -36,6 +38,7 @@ public final class JUnit5BazelRunner {
   private static final int EXIT_CODE_TEST_RUNNER_FAILURE = 2;
   private static final int EXIT_CODE_TEST_FAILURE_OOM = 137;
 
+  private static final String bazelEnvRunfilesManifestOnly = "RUNFILES_MANIFEST_ONLY";
   private static final String bazelEnvSelfLocation = "SELF_LOCATION";
   private static final String bazelEnvTestTmpDir = "TEST_TMPDIR";
   private static final String bazelEnvRunFilesDir = "RUNFILES_DIR";
@@ -48,9 +51,14 @@ public final class JUnit5BazelRunner {
   private static final String jbEnvPrintTestSrcDirContent = "JB_TEST_PRINT_TEST_SRCDIR_CONTENT";
   private static final String jbEnvPrintEnv = "JB_TEST_PRINT_ENV";
   private static final String jbEnvPrintSystemProperties = "JB_TEST_PRINT_SYSTEM_PROPERTIES";
-  // true by default. try as much as possible to run tests in sandbox
   private static final String jbEnvSandbox = "JB_TEST_SANDBOX";
   private static final String jbEnvXmlOutputFile = "JB_XML_OUTPUT_FILE";
+  // Enable IntelliJ Service Messages stream from test process
+  private static final String jbEnvIdeSmRun = "JB_IDE_SM_RUN";
+  // Allows specifying an unambiguous test filter format that supports, e.g., method names with spaces in them
+  private static final String jbEnvTestFilter = "JB_TEST_FILTER";
+  // Allow rerun-failed selection via JUnit5 UniqueId list
+  private static final String jbEnvTestUniqueIds = "JB_TEST_UNIQUE_IDS";
 
   private static final ClassLoader ourClassLoader = Thread.currentThread().getContextClassLoader();
   private static final Launcher launcher = LauncherFactory.create();
@@ -130,7 +138,11 @@ public final class JUnit5BazelRunner {
       Path tempDir = getBazelTempDir();
 
       String jbEnvSandboxValue = System.getenv(jbEnvSandbox);
-      boolean sandbox = Boolean.parseBoolean(jbEnvSandboxValue != null ? jbEnvSandboxValue : "true");
+      if (jbEnvSandboxValue == null) {
+        throw new RuntimeException("Missing " + jbEnvSandbox + " env variable in bazel test environment");
+      }
+
+      boolean sandbox = Boolean.parseBoolean(jbEnvSandboxValue);
       System.err.println("Use sandbox: " + sandbox);
 
       if (sandbox) {
@@ -178,6 +190,15 @@ public final class JUnit5BazelRunner {
       }
 
       var testExecutionListeners = getTestExecutionListeners();
+      // Add shutdown hook for SM listener to handle interrupts
+      IjSmTestExecutionListener smListener = null;
+      for (var l : testExecutionListeners) {
+        if (l instanceof IjSmTestExecutionListener) { smListener = (IjSmTestExecutionListener) l; break; }
+      }
+      if (smListener != null) {
+        IjSmTestExecutionListener finalSmListener = smListener;
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> finalSmListener.closeForInterrupt(), "IjSmTestExecutionListenerShutdownHook"));
+      }
 
       try (var bazelJUnitOutputListener = new BazelJUnitOutputListener(xmlOutputFile)) {
         Runtime.getRuntime()
@@ -189,10 +210,8 @@ public final class JUnit5BazelRunner {
         launcher.execute(testPlan);
       }
 
-      if (testExecutionListeners.stream().anyMatch(
-        l -> (l instanceof ConsoleTestLogger && ((ConsoleTestLogger)l).hasTestsWithThrowableResults()) ||
-             (l instanceof BazelJUnitOutputListener && ((BazelJUnitOutputListener)l).hasTestsWithThrowableResults()))
-      ) {
+      if (testExecutionListeners.stream()
+        .anyMatch(l -> l instanceof BazelJUnitOutputListener && ((BazelJUnitOutputListener)l).hasTestsWithThrowableResults())) {
         System.err.println("Some tests failed");
         System.exit(EXIT_CODE_TEST_FAILURE_OTHER);
       }
@@ -232,9 +251,47 @@ public final class JUnit5BazelRunner {
   private static List<TestExecutionListener> getTestExecutionListeners() {
     List<TestExecutionListener> myListeners = new ArrayList<>();
     if (!isUnderTeamCity()) {
-      myListeners.add(new ConsoleTestLogger());
+      if ("true".equals(System.getenv(jbEnvIdeSmRun))) {
+        myListeners.add(new IjSmTestExecutionListener());
+      } else {
+        myListeners.add(new ConsoleTestLogger());
+      }
     }
     return myListeners;
+  }
+
+  private static void addSelectorsFromJbEnv(ClassLoader classLoader, List<DiscoverySelector> out) {
+    // We can use colons and semicolons as separators because they aren't allowed in identifiers neither in Java nor Kotlin
+    // See https://kotlinlang.org/docs/reference/grammar.html
+
+    // JB_TEST_UNIQUE_IDS: semicolon-separated list of JUnit5 UniqueIds
+    String uniqueIds = System.getenv(jbEnvTestUniqueIds);
+    if (uniqueIds != null && !uniqueIds.isBlank()) {
+      for (String uid : uniqueIds.split(";")) {
+        if (!uid.isEmpty()) {
+          out.add(DiscoverySelectors.selectUniqueId(uid));
+        }
+      }
+    }
+    // JB_TEST_FILTER: semicolon-separated list of class, class:method, or class:method:comma_separated_parameter_type_names
+    String methods = System.getenv(jbEnvTestFilter);
+    if (methods != null && !methods.isBlank()) {
+      for (String token : methods.split(";")) {
+        if (token.isEmpty()) continue;
+        String[] parts = token.split(":");
+        switch (parts.length) {
+          case 1:
+            out.add(selectClass(classLoader, /*className*/ parts[0]));
+            break;
+          case 2:
+            out.add(selectMethod(classLoader, /*className*/ parts[0], /*methodName*/ parts[1]));
+            break;
+          case 3:
+            out.add(selectMethod(classLoader, /*className*/ parts[0], /*methodName*/ parts[1], /*parameterTypeNames*/ parts[2]));
+            break;
+        }
+      }
+    }
   }
 
   private static Filter<?>[] getTestFilters(List<? extends DiscoverySelector> bazelTestSelectors) {
@@ -248,8 +305,8 @@ public final class JUnit5BazelRunner {
       return filters.toArray(new Filter[0]);
     }
 
-    // in case when we already have precise method selectors, so we aren't going to filter by test class name
-    if (bazelTestSelectors.stream().allMatch(selector -> selector instanceof MethodSelector)) {
+    // If we already have precise selectors (method or uniqueId), don't also apply class name filter
+    if (bazelTestSelectors.stream().allMatch(selector -> selector instanceof MethodSelector || selector instanceof UniqueIdSelector)) {
       return filters.toArray(new Filter[0]);
     }
 
@@ -265,11 +322,20 @@ public final class JUnit5BazelRunner {
   }
 
   private static List<? extends DiscoverySelector> getTestsSelectors(ClassLoader classLoader) throws Throwable {
+    // First, allow IDE-driven rerun-failed via explicit env vars
+    List<DiscoverySelector> jbSelectors = new ArrayList<>();
+    addSelectorsFromJbEnv(classLoader, jbSelectors);
+    if (!jbSelectors.isEmpty()) {
+      return jbSelectors;
+    }
+
+    // Next, Bazel's TESTBRIDGE_TEST_ONLY method selector (single class#method)
     List<? extends DiscoverySelector> bazelTestClassSelector = getBazelTestMethodSelectors(classLoader);
     if (!bazelTestClassSelector.isEmpty()) {
       return bazelTestClassSelector;
     }
 
+    // Otherwise, discover from classpath roots
     return getTestSelectorsByClassPathRoots(classLoader);
   }
 
@@ -296,10 +362,6 @@ public final class JUnit5BazelRunner {
     if (parts.length == 2) {
       String className = parts[0];
       String methodName = parts[1];
-      //let's be strict here and force user to specify fully qualified class name
-      if (!className.contains(".")) {
-        throw new IllegalArgumentException("Class name should contain package when filtering with method name: " + className);
-      }
       System.err.println("Selecting class: " + className);
       System.err.println("Selecting method: " + methodName);
       return List.of(selectMethod(classLoader, className, methodName));
@@ -361,8 +423,11 @@ public final class JUnit5BazelRunner {
   }
 
   private static Boolean isBazelTestRun() {
-    return Stream.of(bazelEnvSelfLocation, bazelEnvTestTmpDir, bazelEnvRunFilesDir, bazelEnvJavaRunFilesDir)
+    return Stream.of(bazelEnvTestTmpDir, bazelEnvRunFilesDir, bazelEnvJavaRunFilesDir)
       .allMatch(bazelTestEnv -> {
+        var bazelTestEnvValue = System.getenv(bazelTestEnv);
+        return bazelTestEnvValue != null && !bazelTestEnvValue.isBlank();
+      }) && Stream.of(bazelEnvSelfLocation, bazelEnvRunfilesManifestOnly).anyMatch(bazelTestEnv -> {
         var bazelTestEnvValue = System.getenv(bazelTestEnv);
         return bazelTestEnvValue != null && !bazelTestEnvValue.isBlank();
       });
@@ -436,6 +501,10 @@ public final class JUnit5BazelRunner {
     List<Path> paths = (List<Path>)getBaseUrls.invoke(classLoader);
 
     String bazelTestSelfLocation = System.getenv(bazelEnvSelfLocation);
+    // the relevant jars are expected to be next to the classloader when no SELF_LOCATION is set (singlejar, windows runs)
+    if (bazelTestSelfLocation == null || bazelTestSelfLocation.isBlank()) {
+      return new HashSet<>(paths);
+    }
     Path bazelTestSelfLocationDir = Path.of(bazelTestSelfLocation).getParent().toAbsolutePath();
     return paths.stream()
       .filter(p -> bazelTestSelfLocationDir.equals(p.toAbsolutePath().getParent()))
@@ -455,8 +524,6 @@ public final class JUnit5BazelRunner {
   }
 
   private static class ConsoleTestLogger implements TestExecutionListener {
-    private final Set<TestIdentifier> testsWithThrowableResult = new HashSet<>();
-
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
       System.out.println("Test plan started: " + testPlan.countTestIdentifiers(TestIdentifier::isTest) + " tests found.");
@@ -477,23 +544,8 @@ public final class JUnit5BazelRunner {
     }
 
     @Override
-    public void executionFinished(TestIdentifier testIdentifier, TestExecutionResult result) {
-      if (testIdentifier.isTest()) {
-        result.getThrowable().ifPresent(testThrowable -> {
-          if (!IgnoreException.isIgnoringThrowable(testThrowable)) {
-            testsWithThrowableResult.add(testIdentifier);
-          }
-        });
-      }
-    }
-
-    @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
       System.out.println("Test plan finished with " + testPlan.countTestIdentifiers(TestIdentifier::isTest) + " tests.");
-    }
-
-    private Boolean hasTestsWithThrowableResults() {
-      return !testsWithThrowableResult.isEmpty();
     }
   }
 

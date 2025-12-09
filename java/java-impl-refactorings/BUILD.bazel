@@ -35,9 +35,9 @@ jvm_library(
     "//platform/structure-view-impl:structureView-impl",
     "//platform/usageView",
     "//platform/ide-core-impl",
-    "@lib//:stream_ex",
+    "//libraries/stream",
     "//platform/code-style-impl:codeStyle-impl",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/diff-impl",
     "//platform/usageView-impl",
     "//platform/util/diff",
@@ -45,6 +45,8 @@ jvm_library(
     "//platform/core-ui",
     "//xml/xml-psi-api:psi",
     "//java/codeserver/core",
+    "//platform/execution",
+    "//platform/forms_rt:java-guiForms-rt",
   ]
 )
 ### auto-generated section `build intellij.java.impl.refactorings` end

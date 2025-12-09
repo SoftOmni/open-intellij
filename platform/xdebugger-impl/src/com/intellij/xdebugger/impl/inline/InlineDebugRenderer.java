@@ -17,23 +17,22 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.platform.debugger.impl.shared.XDebuggerExecutionPointManager;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleColoredText;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XNamedValue;
 import com.intellij.xdebugger.frame.XValue;
 import com.intellij.xdebugger.frame.presentation.XValuePresentation;
-import com.intellij.xdebugger.impl.XDebuggerExecutionPointManager;
-import com.intellij.xdebugger.impl.XDebuggerManagerImpl;
 import com.intellij.xdebugger.impl.XSourcePositionImpl;
 import com.intellij.xdebugger.impl.evaluate.XValueCompactPresentation;
 import com.intellij.xdebugger.impl.evaluate.quick.XDebuggerTreeCreator;
-import com.intellij.xdebugger.impl.frame.XDebugSessionProxy;
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugManagerProxy;
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import com.intellij.xdebugger.impl.ui.XDebuggerUIConstants;
@@ -94,7 +93,7 @@ public final class InlineDebugRenderer extends InlineDebugRendererBase {
     int x = event.getMouseEvent().getX();
     boolean isRemoveIconClick = myCustomNode && x >= myRemoveXCoordinate;
     if (isRemoveIconClick) {
-      XDebugSessionTab tab = mySession.getSessionTab();
+      XDebugSessionTab tab = (XDebugSessionTab)mySession.getSessionTab();
       if (tab != null) {
         tab.getWatchesView().removeWatches(Collections.singletonList(myValueNode));
       }
@@ -246,8 +245,8 @@ public final class InlineDebugRenderer extends InlineDebugRendererBase {
     static boolean isFullLineHighlighter(@NotNull XDebugSessionProxy session, @NotNull VirtualFile file, int lineNumber,
                                          boolean isToCheckTopFrameOnly) {
       Project project = session.getProject();
-      XDebuggerManagerImpl debuggerManager = (XDebuggerManagerImpl)XDebuggerManager.getInstance(project);
-      XDebuggerExecutionPointManager executionPointManager = debuggerManager.getExecutionPointManager();
+      XDebuggerExecutionPointManager executionPointManager = XDebugManagerProxy.getInstance().getDebuggerExecutionPointManager(project);
+      if (executionPointManager == null) return false;
       return executionPointManager.isFullLineHighlighterAt(file, lineNumber, project, isToCheckTopFrameOnly);
     }
 

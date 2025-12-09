@@ -27,7 +27,9 @@ import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.intellij.util.SystemProperties
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.concurrency.AppScheduledExecutorService
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.io.basicAttributesIfExists
+import com.intellij.util.io.blockingDispatcher
 import com.intellij.util.io.sanitizeFileName
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
@@ -84,6 +86,7 @@ internal class PerformanceWatcherImpl(private val coroutineScope: CoroutineScope
   }
 
   private val isActive: Boolean = !ApplicationManager.getApplication().isHeadlessEnvironment
+  private var smokeAndMirrorsCounter: Int = 0
 
   private val taskFlow = MutableSharedFlow<FreezeCheckerTask?>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
@@ -155,10 +158,14 @@ internal class PerformanceWatcherImpl(private val coroutineScope: CoroutineScope
         service.setNewThreadListener { _, _ ->
           val executorSize = service.backendPoolExecutorSize
           if (executorSize > reasonableThreadPoolSize.asInteger() + allAvailableProcessors) {
-            val message = "Too many threads: $executorSize created in the global Application pool. " +
-                          "($reasonableThreadPoolSize, available processors: $allAvailableProcessors)"
-            val file = dumpThreads(pathPrefix = "newPooledThread/", appendMillisecondsToFileName = true, contentsPrefix = message, stripDump = true)
-            LOG.info(message + if (file == null) "" else "; thread dump is saved to '$file'")
+            // if this listener is called on EDT, then thread dump collection leads to a freeze
+            @OptIn(DelicateCoroutinesApi::class)
+            launch(blockingDispatcher) {
+              val message = "Too many threads: $executorSize created in the global Application pool. " +
+                            "($reasonableThreadPoolSize, available processors: $allAvailableProcessors)"
+              val file = dumpThreads(pathPrefix = "newPooledThread/", appendMillisecondsToFileName = true, contentsPrefix = message, stripDump = true)
+              LOG.info(message + if (file == null) "" else "; thread dump is saved to '$file'")
+            }
           }
         }
       }
@@ -236,15 +243,29 @@ internal class PerformanceWatcherImpl(private val coroutineScope: CoroutineScope
       return if (value <= 0) 0 else value.coerceIn(500, 20000)
     }
 
+  override fun smokeAndMirrors(name: @NonNls String): AccessToken {
+    LOG.trace("Entered smokeAndMirrors phase: $name")
+    ThreadingAssertions.assertEventDispatchThread()
+    smokeAndMirrorsCounter++
+
+    return AccessToken.create {
+      LOG.trace("Exited smokeAndMirrors phase: $name")
+      ThreadingAssertions.assertEventDispatchThread()
+      smokeAndMirrorsCounter--
+    }
+  }
+
   @ApiStatus.Internal
   override fun edtEventStarted() {
     if (!isActive) return
+    if (smokeAndMirrorsCounter > 0) return
     stopCurrentTaskAndReEmit(FreezeCheckerTask(System.nanoTime()))
   }
 
   @ApiStatus.Internal
   override fun edtEventFinished() {
     if (!isActive) return
+    if (smokeAndMirrorsCounter > 0) return
     stopCurrentTaskAndReEmit(null)
   }
 

@@ -24,11 +24,14 @@ jvm_library(
     "//platform/util:util-ui",
     "//platform/platform-impl:ide-impl",
     "//platform/projectModel-api:projectModel",
-    "@lib//:fastutil-min",
+    "//libraries/fastutil",
     "//platform/code-style-impl:codeStyle-impl",
     "//xml/xml-psi-api:psi",
     "//platform/analysis-api:analysis",
     "//xml/xml-psi-impl:psi-impl",
+    "//platform/core-impl",
+    "//platform/lang-api:lang",
+    "//platform/forms_rt:java-guiForms-rt",
   ]
 )
 ### auto-generated section `build intellij.xml.ui.common` end

@@ -6,6 +6,8 @@ import com.intellij.openapi.editor.impl.event.EditorEventMulticasterImpl;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.impl.PsiDocumentManagerBase;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.psi.impl.PsiDocumentManagerEx;
 import org.jetbrains.annotations.TestOnly;
 import org.junit.Assert;
 
@@ -13,6 +15,13 @@ import java.util.*;
 
 @TestOnly
 public final class EditorListenerTracker {
+  private static final Set<String> APP_LEVEL_LISTENERS = Set.of(
+    "com.intellij.copyright.CopyrightManagerDocumentListener$",
+    "com.intellij.model.BranchServiceImpl$",
+    "com.jetbrains.liveEdit.highlighting.ElementHighlighterCaretListener",
+    "com.intellij.grazie.ide.inspection.auto.ChangeTracker$"
+  );
+
   private final Map<Class<? extends EventListener>, List<? extends EventListener>> before;
 
   public EditorListenerTracker() {
@@ -35,15 +44,13 @@ public final class EditorListenerTracker {
         // listeners may hang on default project which comes and goes unpredictably, so just ignore them
         afterList.removeIf(listener -> {
           //noinspection CastConflictsWithInstanceof
-          if (listener instanceof PsiDocumentManager && ((PsiDocumentManagerBase)listener).isDefaultProject()) {
+          if (listener instanceof PsiDocumentManager && ((PsiDocumentManagerEx)listener).isDefaultProject()) {
             return true;
           }
 
           // app level listener
           String name = listener.getClass().getName();
-          return name.startsWith("com.intellij.copyright.CopyrightManagerDocumentListener$") ||
-                 name.startsWith("com.intellij.model.BranchServiceImpl$") ||
-                 name.startsWith("com.jetbrains.liveEdit.highlighting.ElementHighlighterCaretListener");
+          return ContainerUtil.exists(APP_LEVEL_LISTENERS, name::startsWith);
         });
         if (!afterList.isEmpty()) {
           leaked.put(aClass, afterList);

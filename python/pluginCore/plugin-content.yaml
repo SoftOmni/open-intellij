@@ -1,12 +1,3 @@
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.backend.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen.backend
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.frontend.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen.frontend
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen
 - name: lib/modules/intellij.python.ast.jar
   contentModules:
   - name: intellij.python.ast
@@ -39,19 +30,9 @@
   - name: intellij.python.community.impl.installer
 - name: lib/modules/intellij.python.community.impl.jar
   projectLibraries:
-  - name: jackson-dataformat-yaml
-    files:
-    - name: $MAVEN_REPOSITORY$/com/fasterxml/jackson/dataformat/jackson-dataformat-yaml/2/jackson-dataformat-yaml-2.jar
-    reason: <- intellij.python.community.impl
   - name: jsr305
     files:
     - name: $MAVEN_REPOSITORY$/com/google/code/findbugs/jsr305/3/jsr305-3.jar
-    reason: <- intellij.python.community.impl
-  - name: kaml
-    files:
-    - name: $MAVEN_REPOSITORY$/com/charleskorn/kaml/kaml-jvm/0/kaml-jvm-0.jar
-    - name: $MAVEN_REPOSITORY$/it/krzeminski/snakeyaml-engine-kmp-jvm/3/snakeyaml-engine-kmp-jvm-3.jar
-    - name: $MAVEN_REPOSITORY$/net/thauvin/erik/urlencoder/urlencoder-lib-jvm/1/urlencoder-lib-jvm-1.jar
     reason: <- intellij.python.community.impl
   - name: libthrift
     files:
@@ -64,9 +45,21 @@
       - name: $MAVEN_REPOSITORY$/completion/ml/python/features/ml-completion-prev-exprs-models/1/ml-completion-prev-exprs-models-1.jar
       completion-ranking-python-with-full-line:
       - name: $MAVEN_REPOSITORY$/org/jetbrains/intellij/deps/completion/completion-ranking-python-with-full-line/0/completion-ranking-python-with-full-line-0.jar
-- name: lib/modules/intellij.python.community.impl.poetry.jar
+- name: lib/modules/intellij.python.community.impl.pipenv.jar
   contentModules:
-  - name: intellij.python.community.impl.poetry
+  - name: intellij.python.community.impl.pipenv
+- name: lib/modules/intellij.python.community.impl.poetry.backend.jar
+  contentModules:
+  - name: intellij.python.community.impl.poetry.backend
+- name: lib/modules/intellij.python.community.impl.poetry.common.jar
+  contentModules:
+  - name: intellij.python.community.impl.poetry.common
+- name: lib/modules/intellij.python.community.impl.uv.backend.jar
+  contentModules:
+  - name: intellij.python.community.impl.uv.backend
+- name: lib/modules/intellij.python.community.impl.uv.common.jar
+  contentModules:
+  - name: intellij.python.community.impl.uv.common
 - name: lib/modules/intellij.python.community.impl.venv.jar
   contentModules:
   - name: intellij.python.community.impl.venv
@@ -116,20 +109,39 @@
   contentModules:
   - name: intellij.python.markdown
 - name: lib/modules/intellij.python.ml.features.jar
+  projectLibraries:
+  - name: jetbrains.mlapi.catboost
+    files:
+    - name: $MAVEN_REPOSITORY$/com/jetbrains/mlapi/mlapi-catboost/0/mlapi-catboost-0.jar
+    reason: <- intellij.python.ml.features
+  - name: jetbrains.mlapi.catboost.shadow.need.slf4j
+    files:
+    - name: $MAVEN_REPOSITORY$/com/jetbrains/mlapi/catboost-shadow-need-slf4j/1/catboost-shadow-need-slf4j-1.jar
+    reason: <- intellij.python.ml.features
   contentModules:
   - name: intellij.python.ml.features
     libraries:
       jetbrains.ml.models.python.imports.ranking.model:
-      - name: $MAVEN_REPOSITORY$/com/jetbrains/ml/models/python-imports-ranking-model/coral-panda-republished-4/python-imports-ranking-model-coral-panda-republished-4.jar
+      - name: $MAVEN_REPOSITORY$/com/jetbrains/ml/models/python-imports-ranking-model/coral-panda-republished-6/python-imports-ranking-model-coral-panda-republished-6.jar
 - name: lib/modules/intellij.python.parser.jar
   contentModules:
   - name: intellij.python.parser
+- name: lib/modules/intellij.python.processOutput.impl.jar
+  contentModules:
+  - name: intellij.python.processOutput.impl
+- name: lib/modules/intellij.python.processOutput.jar
+  contentModules:
+  - name: intellij.python.processOutput
 - name: lib/modules/intellij.python.psi.impl.jar
   contentModules:
   - name: intellij.python.psi.impl
 - name: lib/modules/intellij.python.psi.jar
   contentModules:
   - name: intellij.python.psi
+  library: jetbrains.kotlin.annotations.jvm
+  files:
+  - name: $MAVEN_REPOSITORY$/org/jetbrains/kotlin/kotlin-annotations-jvm/2/kotlin-annotations-jvm-2.jar
+  reason: <- intellij.python.psi
 - name: lib/modules/intellij.python.pydev.jar
   contentModules:
   - name: intellij.python.pydev
@@ -174,8 +186,3 @@
   - name: intellij.python.community.plugin
   contentModules:
   - name: intellij.commandInterface
-- name: lib/xmlrpc.jar
-  library: XmlRPC
-  files:
-  - name: $MAVEN_REPOSITORY$/org/apache/ws/xmlrpc/xmlrpc/2/xmlrpc-2.jar
-  reason: withProjectLibrary

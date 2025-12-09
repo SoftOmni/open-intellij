@@ -6,6 +6,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginStateListener;
 import com.intellij.ide.plugins.PluginStateManager;
+import com.intellij.ide.plugins.marketplace.PluginUpdateActivity;
 import com.intellij.ide.plugins.newui.PluginModelAsyncOperationsExecutor;
 import com.intellij.ide.plugins.newui.PluginUiModel;
 import com.intellij.ide.plugins.newui.PluginUpdatesService;
@@ -25,11 +26,11 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.BuildNumber;
 import com.intellij.openapi.util.Pair;
 import com.intellij.util.containers.ContainerUtil;
+import kotlin.Unit;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.intellij.ide.actions.SettingsEntryPointAction.*;
 
@@ -264,7 +265,8 @@ final class UpdateSettingsEntryPointActionProvider implements ActionProvider {
 
               private static @NotNull InternalPluginResults getInternalPluginUpdates(@NotNull PlatformUpdates.Loaded loadedResult,
                                                                                      @NotNull ProgressIndicator indicator) {
-                return UpdateChecker.getInternalPluginUpdates(loadedResult.getNewBuild().getApiVersion(), indicator);
+                return UpdateChecker.getInternalPluginUpdates(loadedResult.getNewBuild().getApiVersion(), indicator, null,
+                                                              PluginUpdateActivity.INSTALLED_VERSIONS);
               }
             });
 
@@ -331,20 +333,16 @@ final class UpdateSettingsEntryPointActionProvider implements ActionProvider {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public void actionPerformed(@NotNull AnActionEvent e) {
-          Set<PluginId> pluginIds = myUpdatesForPlugins.stream().map(it -> it.getId()).collect(Collectors.toSet());
-          List<@Nullable PluginUiModel> uiModels = ContainerUtil.map(myUpdatesForPlugins, it -> it.getUiModel());
-          PluginModelAsyncOperationsExecutor.INSTANCE.findPlugins(pluginIds, plugins -> {
-            PluginUpdateDialog dialog =
-              new PluginUpdateDialog(e.getProject(), uiModels, myCustomRepositoryPlugins, (Map<PluginId, PluginUiModel>)plugins);
+          Collection<PluginDownloader> updatesForPlugins = myUpdatesForPlugins;
+          PluginModelAsyncOperationsExecutor.INSTANCE.findPlugins(updatesForPlugins, plugins -> {
+            var dialog = new PluginUpdateDialog(e.getProject(), plugins.values(), myCustomRepositoryPlugins, plugins);
             dialog.setFinishCallback(() -> setEnableUpdateAction(true));
             setEnableUpdateAction(false);
-
-            if (!PluginUpdateDialog.showDialogAndUpdate(myUpdatesForPlugins, dialog)) {
+            if (!PluginUpdateDialog.showDialogAndUpdate(updatesForPlugins, dialog)) {
               setEnableUpdateAction(true);
             }
-            return null;
+            return Unit.INSTANCE;
           });
         }
       });

@@ -10,14 +10,19 @@ import com.intellij.diagnostic.EventWatcher
 import com.intellij.diagnostic.LoadingState
 import com.intellij.diagnostic.PerformanceWatcher
 import com.intellij.ide.MnemonicUsageCollector.logMnemonicUsed
-import com.intellij.ide.actions.MaximizeActiveDialogAction
 import com.intellij.ide.dnd.DnDManager
 import com.intellij.ide.dnd.DnDManagerImpl
 import com.intellij.ide.ui.UISettings
+import com.intellij.ide.ui.maximize
+import com.intellij.ide.ui.normalize
+import com.intellij.notification.Notification
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.*
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.impl.InvocationUtil
+import com.intellij.openapi.application.impl.LaterInvocator
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.Logger
@@ -25,6 +30,7 @@ import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.impl.ad.util.ThreadLocalRhizomeDB
 import com.intellij.openapi.extensions.ExtensionPointName
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.keymap.impl.IdeKeyEventDispatcher
 import com.intellij.openapi.keymap.impl.IdeMouseEventDispatcher
 import com.intellij.openapi.keymap.impl.KeyState
@@ -35,6 +41,7 @@ import com.intellij.openapi.util.EmptyRunnable
 import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.util.text.HtmlBuilder
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.openapi.wm.ex.WindowManagerEx
@@ -45,6 +52,7 @@ import com.intellij.ui.ComponentUtil
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.speedSearch.SpeedSearchSupply
 import com.intellij.util.SmartList
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.unwrapContextRunnable
 import com.intellij.util.containers.ContainerUtil
@@ -55,7 +63,10 @@ import com.intellij.util.ui.UIUtil
 import com.jetbrains.JBR
 import com.jetbrains.TextInput
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
@@ -64,7 +75,9 @@ import sun.awt.AppContext
 import sun.awt.PeerEvent
 import sun.awt.SunToolkit
 import java.awt.*
+import java.awt.datatransfer.StringSelection
 import java.awt.event.*
+import java.lang.Runnable
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
@@ -75,6 +88,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 import javax.swing.*
 import javax.swing.plaf.basic.ComboPopup
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration.Companion.minutes
 
 @Suppress("FunctionName")
 class IdeEventQueue private constructor() : EventQueue() {
@@ -93,6 +108,11 @@ class IdeEventQueue private constructor() : EventQueue() {
   @get:Internal
   var popupTriggerTime: Long = -1
     private set
+
+
+  @Internal
+  @Volatile
+  var actuallyWrapInputEventsIntoWriteIntentLock: Boolean = wrapHighLevelInputEventsInWriteIntentLock
 
   /**
    * Counter of processed events. It is used to assert that data context lives only inside a single Swing event.
@@ -140,6 +160,9 @@ class IdeEventQueue private constructor() : EventQueue() {
     assert(isDispatchThread()) { Thread.currentThread() }
     val systemEventQueue = Toolkit.getDefaultToolkit().systemEventQueue
     assert(systemEventQueue !is IdeEventQueue) { systemEventQueue }
+    if (useNonBlockingFlushQueue) {
+      LaterInvocator.initializeNonBlockingFlushQueue(threadingSupport)
+    }
     systemEventQueue.push(this)
     EDT.updateEdt()
     replaceDefaultKeyboardFocusManager()
@@ -325,7 +348,7 @@ class IdeEventQueue private constructor() : EventQueue() {
           try {
             runCustomProcessors(finalEvent, preProcessors)
             performActivity(finalEvent, !nakedRunnable && isPureSwingEventWilEnabled && !threadingSupport.isInsideUnlockedWriteIntentLock()) {
-              if (progressManager == null) {
+              if (progressManager == null || (runnable != null && useNonBlockingFlushQueue && InvocationUtil.isFlushNow(runnable))) {
                 _dispatchEvent(finalEvent)
               }
               else {
@@ -484,11 +507,11 @@ class IdeEventQueue private constructor() : EventQueue() {
 
     if (e is WindowEvent) {
       // app activation can call methods that need write intent (like project saving)
-      if (doNotWrapHighLevelActionsInWriteIntent) {
-        processAppActivationEvent(e)
+      if (wrapHighLevelFunctionsInWriteIntent) {
+        threadingSupport.runPreventiveWriteIntentReadAction { processAppActivationEvent(e) }
       }
       else {
-        threadingSupport.runPreventiveWriteIntentReadAction { processAppActivationEvent(e) }
+        processAppActivationEvent(e)
       }
     }
 
@@ -501,8 +524,24 @@ class IdeEventQueue private constructor() : EventQueue() {
     }
 
     when {
-      e is MouseEvent -> threadingSupport.runPreventiveWriteIntentReadAction { dispatchMouseEvent(e) }
-      e is KeyEvent -> threadingSupport.runPreventiveWriteIntentReadAction { dispatchKeyEvent(e) }
+      e is MouseEvent -> if (actuallyWrapInputEventsIntoWriteIntentLock) {
+        threadingSupport.runPreventiveWriteIntentReadAction {
+          dispatchMouseEvent(e)
+        }
+      } else {
+        withThreadLocal(ThreadingAssertions.inputEventWithoutWriteIntentLock) { Consumer { showBalloonWithAdvice(it) } }.use {
+          dispatchMouseEvent(e)
+        }
+      }
+      e is KeyEvent -> if (actuallyWrapInputEventsIntoWriteIntentLock) {
+        threadingSupport.runPreventiveWriteIntentReadAction {
+          dispatchKeyEvent(e)
+        }
+      } else {
+        withThreadLocal(ThreadingAssertions.inputEventWithoutWriteIntentLock) { Consumer { showBalloonWithAdvice(it) } }.use {
+          dispatchKeyEvent(e)
+        }
+      }
       appIsLoaded() -> {
         val app = ApplicationManagerEx.getApplicationEx()
         if (e is ComponentEvent) {
@@ -614,11 +653,11 @@ class IdeEventQueue private constructor() : EventQueue() {
     }
 
     if (dispatchers.isNotEmpty() || hasOldDispatchers) {
-      val result = WriteIntentReadAction.compute<Boolean, Throwable> {
+      val result = WriteIntentReadAction.computeThrowable<Boolean, Throwable> {
         for (eachDispatcher in dispatchers) {
           try {
             if (eachDispatcher.dispatch(e)) {
-              return@compute true
+              return@computeThrowable true
             }
           }
           catch (t: Throwable) {
@@ -629,7 +668,7 @@ class IdeEventQueue private constructor() : EventQueue() {
         for (eachDispatcher in DISPATCHER_EP.extensionsIfPointIsRegistered) {
           try {
             if (eachDispatcher !is NonLockedEventDispatcher && eachDispatcher.dispatch(e)) {
-              return@compute true
+              return@computeThrowable true
             }
           }
           catch (t: Throwable) {
@@ -788,10 +827,10 @@ class IdeEventQueue private constructor() : EventQueue() {
         if (parent is JDialog) {
           invokeLater {
             if (e.keyCode == KeyEvent.VK_UP) {
-              MaximizeActiveDialogAction.maximize(parent)
+              parent.maximize()
             }
             else {
-              MaximizeActiveDialogAction.normalize(parent)
+              parent.normalize()
             }
           }
           return true
@@ -1336,8 +1375,58 @@ fun IdeEventQueue.flushExistingEvents() {
         dispatchEvent(nextEvent)
       }
       catch (e: Exception) {
-        Logs.LOG.error(e)
+        if (e !is CancellationException && e !is ControlFlowException) {
+          Logs.LOG.error(e)
+        }
       }
     }
+  }
+}
+
+@Volatile
+private var lastNotificationTime: Long = 0
+
+@Suppress("HardCodedStringLiteral", "OPT_IN_USAGE")
+private fun showBalloonWithAdvice(e: Throwable) {
+  if (System.currentTimeMillis() - lastNotificationTime < 1.minutes.inWholeMilliseconds) {
+    return
+  } else {
+    lastNotificationTime = System.currentTimeMillis()
+  }
+  val issueLink = "https://youtrack.jetbrains.com/issue/IJPL-219144"
+  val assigneeLink = "https://jetbrains.slack.com/team/UL4EL747Q"
+  val notification = Notification("IDE-errors",
+                                  HtmlBuilder()
+                                    .append("An IDE operation failed because of recent changes in read access (")
+                                    .appendLink(issueLink, "see IJPL-219144")
+                                    .append("). Please report it to ")
+                                    .appendLink(assigneeLink, "Konstantin Nisht")
+                                    .append(".")
+                                    .toString(),
+                                  NotificationType.WARNING)
+    .addAction(NotificationAction.createSimple("Copy exception to clipboard") {
+      CopyPasteManager.getInstance().setContents(StringSelection(e.stackTraceToString()))
+    })
+    .addAction(NotificationAction.createSimpleExpiring("Fix read access errors for five minutes") {
+      val currentValue = IdeEventQueue.getInstance().actuallyWrapInputEventsIntoWriteIntentLock
+      IdeEventQueue.getInstance().actuallyWrapInputEventsIntoWriteIntentLock = true
+      GlobalScope.launch {
+        delay(5.minutes)
+        IdeEventQueue.getInstance().actuallyWrapInputEventsIntoWriteIntentLock = currentValue
+      }
+    })
+    .addAction(NotificationAction.createSimpleExpiring("Fix read access errors until restart") {
+      IdeEventQueue.getInstance().actuallyWrapInputEventsIntoWriteIntentLock = true
+    })
+  notification.setListener { _, event ->
+    val linkString = event.url.toString()
+    if (linkString == issueLink || linkString == assigneeLink) {
+      BrowserUtil.browse(event.url)
+    }
+  }
+  notification.notify(null)
+  GlobalScope.launch {
+    delay(1.minutes)
+    notification.expire()
   }
 }

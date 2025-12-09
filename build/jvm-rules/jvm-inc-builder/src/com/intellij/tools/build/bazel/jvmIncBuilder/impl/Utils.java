@@ -4,12 +4,12 @@ package com.intellij.tools.build.bazel.jvmIncBuilder.impl;
 import com.dynatrace.hash4j.hashing.HashStream64;
 import com.dynatrace.hash4j.hashing.Hashing;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.jps.util.SystemInfo;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.lang.reflect.Method;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 
 /** @noinspection NonFinalUtilityClass*/
@@ -57,4 +57,66 @@ public class Utils {
     }
   }
 
+  public static void deleteRecursively(Path dataDir) throws IOException {
+    try {
+      // this method makes use of deleteIfExists() that can handle cases when standard Files.deleteIfExists(path) fails to delete
+      // the file because of AccessDeniedException, which might happen on Windows, where file might remain in a "locked" state for no reason
+      Files.walkFileTree(dataDir, new SimpleFileVisitor<>() {
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+          deleteIfExists(file);
+          return FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+          if (exc != null) {
+            throw exc;
+          }
+          try {
+            deleteIfExists(dir);
+          }
+          catch (DirectoryNotEmptyException ignore) {
+          }
+          return FileVisitResult.CONTINUE;
+        }
+      });
+    }
+    catch (NoSuchFileException ignored) {
+    }
+  }
+
+  private static final String WINDOWS_ERROR_TOO_MANY_LINKS;
+  static {
+    // sun.nio.fs.WindowsNativeDispatcher.FormatMessage(1142)
+    String errorMessage = "An attempt was made to create more links on a file than the file system supports"; // default
+    if (SystemInfo.isWindows) {
+      try {
+        // attempt to get the locate specific error message
+        Method requestMethod = Class.forName("sun.nio.fs.WindowsNativeDispatcher").getDeclaredMethod("FormatMessage", int.class);
+        requestMethod.setAccessible(true);
+        errorMessage = (String)requestMethod.invoke(null, 1142 /*the code for 'too many hardlinks' error*/);
+      }
+      catch (Throwable err) {
+        throw new RuntimeException(err);
+      }
+    }
+    WINDOWS_ERROR_TOO_MANY_LINKS = errorMessage;
+  }
+
+  public static boolean tryCreateLink(Path link, Path existing) throws IOException {
+    try {
+      Files.createLink(link, existing);
+      return true;
+    }
+    catch (FileSystemException e) {
+      String message = e.getMessage();
+      if (message != null && message.endsWith(WINDOWS_ERROR_TOO_MANY_LINKS)) {
+        return false;
+      }
+      else {
+        throw e;
+      }
+    }
+  }
 }

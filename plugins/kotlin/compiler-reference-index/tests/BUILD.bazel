@@ -14,7 +14,7 @@ jvm_library(
   srcs = glob(["test/**/*.kt", "test/**/*.java", "test/**/*.form"], allow_empty = True),
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlin-reflect",
+    "//libraries/kotlin/reflect",
     "@lib//:kotlinc-kotlin-compiler-common",
     "@lib//:kotlinc-kotlin-compiler-tests",
     "//libraries/gson",
@@ -51,6 +51,7 @@ jvm_library(
     "//plugins/kotlin/base/compiler-configuration",
     "//plugins/kotlin/test-framework:test-framework_test_lib",
     "//platform/util",
+    "//plugins/kotlin/intellij.kotlin.base.test:base-test_test_lib",
   ]
 )
 ### auto-generated section `build kotlin.compiler-reference-index.tests` end

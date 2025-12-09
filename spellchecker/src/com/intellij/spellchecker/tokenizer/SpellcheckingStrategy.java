@@ -144,11 +144,21 @@ public class SpellcheckingStrategy implements PossiblyDumbAware {
            && InjectedLanguageUtil.hasInjections((PsiLanguageInjectionHost)element);
   }
 
+  // Used by 3rd party plugins
+  @SuppressWarnings("unused")
   public LocalQuickFix[] getRegularFixes(@NotNull PsiElement element,
                                          @NotNull TextRange textRange,
                                          boolean useRename,
                                          String typo) {
-    return getDefaultRegularFixes(useRename, typo, element, textRange);
+    return getDefaultRegularFixes(useRename, typo, element, textRange, null);
+  }
+
+  public LocalQuickFix[] getRegularFixes(@NotNull PsiElement element,
+                                         @NotNull TextRange textRange,
+                                         boolean useRename,
+                                         String typo,
+                                         @Nullable Set<String> suggestions) {
+    return getDefaultRegularFixes(useRename, typo, element, textRange, suggestions);
   }
 
   public static SpellcheckingStrategy getSpellcheckingStrategy(@NotNull PsiElement element) {
@@ -164,25 +174,25 @@ public class SpellcheckingStrategy implements PossiblyDumbAware {
   public static LocalQuickFix[] getDefaultRegularFixes(boolean useRename,
                                                        String typo,
                                                        @NotNull PsiElement element,
-                                                       @NotNull TextRange range) {
-    ArrayList<LocalQuickFix> result = new ArrayList<>();
+                                                       @NotNull TextRange range,
+                                                       @Nullable Set<String> suggestions) {
+    List<LocalQuickFix> result = new ArrayList<>();
     SpellcheckerRateTracker tracker = new SpellcheckerRateTracker(element);
 
     if (useRename && PsiTreeUtil.getNonStrictParentOfType(element, PsiNamedElement.class) != null) {
       result.add(SpellCheckerQuickFixFactory.rename(typo, range, element, tracker));
     } else {
-      List<LocalQuickFix> fixes = SpellCheckerQuickFixFactory.changeToVariants(element, range, typo, tracker);
+      List<LocalQuickFix> fixes = SpellCheckerQuickFixFactory.changeToVariants(element, range, typo, tracker, suggestions);
+      result.addAll(SpellCheckerQuickFixFactory.additionalFixes());
       result.addAll(fixes);
     }
 
-    final SpellCheckerSettings settings = SpellCheckerSettings.getInstance(element.getProject());
+    SpellCheckerSettings settings = SpellCheckerSettings.getInstance(element.getProject());
+    DictionaryLayer layer = null;
     if (settings.isUseSingleDictionaryToSave()) {
-      DictionaryLayer layer = DictionaryLayersProvider.getLayer(element.getProject(), settings.getDictionaryToSave());
-      result.add(SpellCheckerQuickFixFactory.saveTo(element, range, typo, layer, tracker));
-      return result.toArray(LocalQuickFix.EMPTY_ARRAY);
+      layer = DictionaryLayersProvider.getLayer(element.getProject(), settings.getDictionaryToSave());
     }
-
-    result.add(SpellCheckerQuickFixFactory.saveTo(element, range, typo, tracker));
+    result.add(SpellCheckerQuickFixFactory.saveTo(element, range, typo, layer, tracker));
     return result.toArray(LocalQuickFix.EMPTY_ARRAY);
   }
 

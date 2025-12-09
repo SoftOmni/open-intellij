@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.projectView.impl.nodes;
 
+import com.intellij.codeInsight.multiverse.CodeInsightContexts;
 import com.intellij.ide.projectView.NodeSortOrder;
 import com.intellij.ide.projectView.NodeSortSettings;
 import com.intellij.ide.projectView.PresentationData;
@@ -47,10 +48,11 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
-public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements NavigatableWithText, PathElementIdProvider {
+public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements NavigatableWithText, PathElementIdProvider, NodeWithMeasurableExpand {
   // the chain from a parent directory to this one usually contains only one virtual file
   private final Set<VirtualFile> chain = new SmartHashSet<>();
 
@@ -106,8 +108,13 @@ public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements Navig
 
     if (ProjectRootsUtil.isModuleContentRoot(directoryFile, project)) {
       ProjectFileIndex fi = ProjectRootManager.getInstance(project).getFileIndex();
-      List<Module> modules =
-        ContainerUtil.filter(fi.getModulesForFile(directoryFile, true), module -> !ModuleType.isInternal(module));
+      List<Module> modules;
+      if (CodeInsightContexts.isSharedSourceSupportEnabled(project)) {
+        modules = ContainerUtil.filter(fi.getModulesForFile(directoryFile, true), module -> !ModuleType.isInternal(module));
+      }
+      else {
+        modules = Collections.singletonList(fi.getModuleForFile(directoryFile));
+      }
 
       var directoryName = getPossiblyCompactedDirectoryName();
       data.setPresentableText(directoryName);
@@ -171,8 +178,23 @@ public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements Navig
 
   @Override
   public @NotNull String getPathElementId() {
-    var value = getEqualityObject();
-    return value == null ? "" : value.toString();
+    if (shouldUseSimplifiedProjectTreeState()) {
+      String name = getName();
+      return name == null ? "<noname>" : name;
+    }
+    else {
+      var value = getEqualityObject();
+      return value == null ? "" : value.toString();
+    }
+  }
+
+  @Override
+  public @Nullable String getPathElementType() {
+    if (shouldUseSimplifiedProjectTreeState()) {
+      return GENERIC_PROJECT_VIEW_NODE_TYPE;
+    } else {
+      return null;
+    }
   }
 
   protected static boolean canRealModuleNameBeHidden() {

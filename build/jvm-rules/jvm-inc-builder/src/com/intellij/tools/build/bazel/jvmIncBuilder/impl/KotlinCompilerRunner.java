@@ -1,14 +1,14 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.tools.build.bazel.jvmIncBuilder.impl;
 
-import com.intellij.openapi.progress.ProcessCanceledException;
-import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.kotlin.com.intellij.openapi.progress.ProcessCanceledException;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.tools.build.bazel.jvmIncBuilder.*;
 import com.intellij.tools.build.bazel.jvmIncBuilder.runner.CompilerDataSink;
 import com.intellij.tools.build.bazel.jvmIncBuilder.runner.CompilerRunner;
 import com.intellij.tools.build.bazel.jvmIncBuilder.runner.OutputOrigin;
 import com.intellij.tools.build.bazel.jvmIncBuilder.runner.OutputSink;
-import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.kotlin.com.intellij.util.containers.ContainerUtil;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function1;
 import org.jetbrains.annotations.NotNull;
@@ -181,13 +181,16 @@ public class KotlinCompilerRunner implements CompilerRunner {
       }
       finally {
         processTrackers(out, generatedClasses);
-        if (myModuleEntryPath != null && completedOk && !messageCollector.hasErrors()) {
+        if (myModuleEntryPath != null) {
           byte[] updated = myStorageManager.getOutputBuilder().getContent(myModuleEntryPath);
-          if (updated == null) {
-            // report probable error
-            diagnostic.report(Message.info(this, "Module entry \"" + myModuleEntryPath +"\" has not been generated for target \"" + myContext.getTargetName() + "\""));
+          if (updated != null) {
+            // save the updated state for the next round
+            myLastGoodModuleEntryContent = updated;
           }
-          myLastGoodModuleEntryContent = updated; // save the updated state for the next round
+          else {
+            // make sure the output contains the module entry corresponding to last known good state
+            myStorageManager.getOutputBuilder().putEntry(myModuleEntryPath, myLastGoodModuleEntryContent);
+          }
         }
       }
     }

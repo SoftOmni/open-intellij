@@ -3,17 +3,20 @@ package com.intellij.lang.impl.modcommand;
 
 import com.intellij.analysis.AnalysisBundle;
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
+import com.intellij.codeInsight.intention.preview.IntentionPreviewUtils;
 import com.intellij.codeInspection.options.*;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.modcommand.*;
 import com.intellij.modcommand.ModUpdateFileText.Fragment;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.HtmlBuilder;
 import com.intellij.openapi.util.text.HtmlChunk;
@@ -34,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static com.intellij.openapi.util.text.HtmlChunk.tag;
 import static com.intellij.openapi.util.text.HtmlChunk.text;
@@ -84,6 +88,7 @@ public class ModCommandBatchExecutorImpl implements ModCommandExecutor {
       return Result.INTERACTIVE;
     }
     return switch (command) {
+      case ModRegisterTabOut ignored -> Result.NOTHING;
       case ModUpdateFileText upd -> executeUpdate(project, upd) ? Result.SUCCESS : Result.ABORT;
       case ModCreateFile create -> {
         String message = executeCreate(project, create);
@@ -108,7 +113,7 @@ public class ModCommandBatchExecutorImpl implements ModCommandExecutor {
       case ModChooseAction chooser -> executeChooseInBatch(context, chooser);
       case ModShowConflicts ignored -> Result.CONFLICTS;
       case ModEditOptions<?> editOptions -> bypassEditOptions(editOptions, context);
-      case ModDisplayMessage(String text, var kind) -> switch (kind) {
+      case ModDisplayMessage(@NlsContexts.Tooltip String text, var kind) -> switch (kind) {
         case ERROR -> new Error(text);
         case INFORMATION -> Result.INTERACTIVE;
       };
@@ -220,8 +225,34 @@ public class ModCommandBatchExecutorImpl implements ModCommandExecutor {
         }
         updateText(file.getProject(), file.getViewProvider().getDocument(), updateFileText);
       }
-      else if (!(cmd instanceof ModNavigate) && !(cmd instanceof ModHighlight)) {
+      else if (!(cmd instanceof ModNavigate) && !(cmd instanceof ModHighlight) && !(cmd instanceof ModRegisterTabOut)) {
         throw new UnsupportedOperationException("Unexpected command: " + command);
+      }
+    }
+  }
+
+  @Override
+  public void obtainAndExecuteInteractively(@NotNull ActionContext context,
+                                            @Nls String title,
+                                            @Nullable Editor editor,
+                                            @NotNull Supplier<? extends @NotNull ModCommand> commandSupplier) {
+    if (IntentionPreviewUtils.isIntentionPreviewActive()) {
+      ModCommand command = commandSupplier.get();
+      executeForFileCopy(command, context.file());
+      return;
+    }
+    ModCommand command = ProgressManager.getInstance().runProcessWithProgressSynchronously(
+      () -> ReadAction.nonBlocking(commandSupplier::get)
+        .expireWhen(() -> context.project().isDisposed() || (editor != null && editor.isDisposed()))
+        .executeSynchronously(),
+      title, true, context.project());
+    if (!command.isEmpty()) {
+      CommandProcessor commandProcessor = CommandProcessor.getInstance();
+      if (!commandProcessor.isCommandInProgress()) {
+        commandProcessor.executeCommand(context.project(),
+                                        () -> executeInteractively(context, command, editor), title, null);
+      } else {
+        executeInteractively(context, command, editor);
       }
     }
   }

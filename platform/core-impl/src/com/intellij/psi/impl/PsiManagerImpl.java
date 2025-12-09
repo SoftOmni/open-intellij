@@ -6,7 +6,6 @@ import com.intellij.lang.PsiBuilderFactory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.impl.TransferredWriteActionService;
 import com.intellij.openapi.diagnostic.ControlFlowException;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -28,7 +27,7 @@ import com.intellij.psi.impl.file.impl.FileManagerEx;
 import com.intellij.psi.impl.file.impl.FileManagerImpl;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.serviceContainer.NonInjectable;
-import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.TransferredWriteActionService;
 import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import com.intellij.util.concurrency.annotations.RequiresWriteLock;
 import com.intellij.util.containers.ContainerUtil;
@@ -109,10 +108,12 @@ public final class PsiManagerImpl extends PsiManagerEx implements Disposable {
   }
 
   @Override
-  @RequiresEdt
   public void dropPsiCaches() {
+    if (!(EDT.isCurrentThreadEdt() || ApplicationManager.getApplication().isWriteAccessAllowed())) {
+      LOG.error("PsiManager#dropPsiCaches must be called in EDT or in write action");
+    }
     dropResolveCaches();
-    ApplicationManager.getApplication().runWriteAction(myFileManager::firePropertyChangedForUnloadedPsi);
+    ApplicationManager.getApplication().runWriteAction(() -> myFileManager.firePropertyChangedForUnloadedPsi());
   }
 
   @Override
@@ -461,7 +462,7 @@ public final class PsiManagerImpl extends PsiManagerEx implements Disposable {
 
   @RequiresWriteLock
   @ApiStatus.Internal
-  static void runWriteActionOnEdtRegardlessOfCurrentThread(Runnable action) {
+  public static void runWriteActionOnEdtRegardlessOfCurrentThread(Runnable action) {
     if (EDT.isCurrentThreadEdt()) {
       action.run();
     }

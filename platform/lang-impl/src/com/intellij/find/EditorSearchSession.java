@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.find;
 
 import com.intellij.BundleBase;
@@ -16,6 +16,8 @@ import com.intellij.openapi.actionSystem.ex.CustomComponentAction;
 import com.intellij.openapi.actionSystem.ex.DefaultCustomComponentAction;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteIntentReadAction;
+import com.intellij.openapi.application.impl.InternalUICustomization;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.event.EditorFactoryEvent;
@@ -40,6 +42,7 @@ import com.intellij.util.SmartList;
 import com.intellij.util.ui.ComponentWithEmptyText;
 import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -268,26 +271,63 @@ public class EditorSearchSession implements SearchSession,
     return myEditor;
   }
 
+  @ApiStatus.Internal
+  public static @Nullable SearchReplaceComponent getSearchReplaceComponent(@Nullable Editor editor) {
+    JComponent headerComponent = editor != null ? editor.getHeaderComponent() : null;
+    if (headerComponent instanceof SearchReplaceComponent c) {
+      return c;
+    }
+    if (headerComponent != null) {
+      Object searchComponent = headerComponent.getClientProperty("SearchComponent");
+      if (searchComponent instanceof SearchReplaceComponent o) {
+        return o;
+      }
+    }
+    return null;
+  }
+
   public static @Nullable EditorSearchSession get(@Nullable Editor editor) {
     JComponent headerComponent = editor != null ? editor.getHeaderComponent() : null;
     SearchSession session = headerComponent instanceof SearchReplaceComponent o ? o.getSearchSession() : null;
-    return session instanceof EditorSearchSession o ? o : null;
+    if (session instanceof EditorSearchSession o) {
+      return o;
+    }
+    if (headerComponent != null) {
+      Object searchSession = headerComponent.getClientProperty("SearchSession");
+      if (searchSession instanceof EditorSearchSession o) {
+        return o;
+      }
+    }
+    return null;
   }
 
   public static @NotNull EditorSearchSession start(@NotNull Editor editor, @NotNull Project project) {
     EditorSearchSession session = new EditorSearchSession(editor, project);
-    editor.setHeaderComponent(session.getComponent());
+    editor.setHeaderComponent(session.getHeaderComponent());
     return session;
   }
 
   public static @NotNull EditorSearchSession start(@NotNull Editor editor, @NotNull FindModel findModel, @NotNull Project project) {
     EditorSearchSession session = new EditorSearchSession(editor, project, findModel);
-    editor.setHeaderComponent(session.getComponent());
+    editor.setHeaderComponent(session.getHeaderComponent());
     return session;
   }
 
   @Override
   public @NotNull SearchReplaceComponent getComponent() {
+    return myComponent;
+  }
+
+  private @NotNull JComponent getHeaderComponent() {
+    InternalUICustomization customization = InternalUICustomization.getInstance();
+    if (customization != null) {
+      JComponent header = customization.configureSearchReplaceComponent(myComponent);
+      if (header != myComponent) {
+        header.putClientProperty("SearchComponent", myComponent);
+        header.putClientProperty("SearchSession", this);
+      }
+      return header;
+    }
     return myComponent;
   }
 
@@ -680,7 +720,9 @@ public class EditorSearchSession implements SearchSession,
 
     @Override
     public final void actionPerformed(ActionEvent e) {
-      onClick();
+      WriteIntentReadAction.run(() -> {
+        onClick();
+      });
     }
 
     protected abstract void update(@NotNull JButton button);
